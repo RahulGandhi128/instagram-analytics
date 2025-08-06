@@ -1,0 +1,7 @@
+# Minimal requirements without pandas
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.0.5
+requests==2.31.0
+pytz==2023.3
+python-dotenv==1.0.0
