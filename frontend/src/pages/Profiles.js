@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Users, CheckCircle, Lock, ExternalLink, Verified, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { analyticsAPI } from '../services/api';
+import ProfilePicture from '../components/ProfilePicture';
 
 const Profiles = ({ showNotification }) => {
   const [profiles, setProfiles] = useState([]);
@@ -14,8 +15,19 @@ const Profiles = ({ showNotification }) => {
     setLoading(true);
     try {
       const response = await analyticsAPI.getProfiles();
-      setProfiles(response.data.data);
+      const profileData = response.data.data;
+      
+      // Debug profile picture URLs
+      console.log('Profile data received:', profileData.map(profile => ({
+        username: profile.username,
+        profile_pic_url: profile.profile_pic_url,
+        profile_pic_exists: !!profile.profile_pic_url,
+        profile_pic_length: profile.profile_pic_url ? profile.profile_pic_url.length : 0
+      })));
+      
+      setProfiles(profileData);
     } catch (error) {
+      console.error('Error fetching profiles:', error);
       showNotification('Error loading profiles', 'error');
     } finally {
       setLoading(false);
@@ -24,29 +36,18 @@ const Profiles = ({ showNotification }) => {
 
   useEffect(() => {
     fetchProfiles();
+    
+    // Listen for global data fetch events
+    const handleDataFetched = () => {
+      fetchProfiles();
+    };
+    
+    window.addEventListener('dataFetched', handleDataFetched);
+    
+    return () => {
+      window.removeEventListener('dataFetched', handleDataFetched);
+    };
   }, [fetchProfiles]);
-
-  const fetchInstagramData = async () => {
-    try {
-      showNotification('Fetching Instagram data... This may take a few minutes', 'info');
-      const response = await fetch('http://localhost:5000/api/fetch-data', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      const data = await response.json();
-      
-      if (data.success) {
-        showNotification('Instagram data fetched successfully!', 'success');
-        await fetchProfiles(); // Refresh profiles after fetching data
-      } else {
-        showNotification(`Error: ${data.error}`, 'error');
-      }
-    } catch (error) {
-      showNotification('Error fetching Instagram data', 'error');
-    }
-  };
 
   const addProfile = async () => {
     if (!newUsername.trim()) {
@@ -72,6 +73,9 @@ const Profiles = ({ showNotification }) => {
         setNewUsername('');
         setShowAddModal(false);
         await fetchProfiles(); // Refresh profiles after adding
+        
+        // Trigger global update for other pages
+        window.dispatchEvent(new CustomEvent('profilesUpdated'));
       } else {
         showNotification(`Error: ${data.error}`, 'error');
       }
@@ -97,6 +101,9 @@ const Profiles = ({ showNotification }) => {
       if (data.success) {
         showNotification(data.message, 'success');
         await fetchProfiles(); // Refresh profiles after deleting
+        
+        // Trigger global update for other pages
+        window.dispatchEvent(new CustomEvent('profilesUpdated'));
       } else {
         showNotification(`Error: ${data.error}`, 'error');
       }
@@ -137,7 +144,7 @@ const Profiles = ({ showNotification }) => {
             Overview of all tracked Instagram accounts
           </p>
         </div>
-        <div className="mt-4 flex md:mt-0 md:ml-4 space-x-3">
+        <div className="mt-4 flex md:mt-0 md:ml-4">
           <button
             onClick={() => setShowAddModal(true)}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
@@ -145,57 +152,33 @@ const Profiles = ({ showNotification }) => {
             <Plus className="w-4 h-4 mr-2" />
             Add Profile
           </button>
-          <button
-            onClick={fetchInstagramData}
-            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-instagram-purple hover:bg-instagram-pink focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-instagram-purple"
-          >
-            <Users className="w-4 h-4 mr-2" />
-            Fetch Instagram Data
-          </button>
-          <button
-            onClick={fetchProfiles}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-          >
-            <Users className="w-4 h-4 mr-2" />
-            Refresh Profiles
-          </button>
         </div>
       </div>
 
-      {/* Profiles Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {/* Profiles Grid with Enhanced Responsiveness */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
         {profiles.map((profile) => (
-          <div key={profile.username} className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div key={profile.username} className="bg-white rounded-lg shadow-md overflow-hidden max-w-sm mx-auto w-full">
             {/* Profile Header */}
-            <div className="p-6 bg-gradient-to-r from-instagram-pink to-instagram-purple">
-              <div className="flex items-center">
-                {profile.profile_pic_url ? (
-                  <img
-                    src={profile.profile_pic_url}
-                    alt={profile.full_name}
-                    className="w-16 h-16 rounded-full border-2 border-white object-cover"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      e.target.nextSibling.style.display = 'flex';
-                    }}
-                  />
-                ) : null}
-                <div 
-                  className={`w-16 h-16 rounded-full bg-white flex items-center justify-center ${profile.profile_pic_url ? 'hidden' : 'flex'}`}
-                  style={{ display: profile.profile_pic_url ? 'none' : 'flex' }}
-                >
-                  <Users className="w-8 h-8 text-gray-400" />
-                </div>
-                <div className="ml-4 flex-1">
+            <div className="p-4 sm:p-6 bg-gradient-to-r from-instagram-pink to-instagram-purple">
+              <div className="flex items-center space-x-3 sm:space-x-4">
+                {/* Profile Picture with Enhanced Debugging and Responsive Sizing */}
+                <ProfilePicture 
+                  profile={profile} 
+                  size="medium"
+                  className="flex-shrink-0"
+                />
+                
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center">
-                    <h3 className="text-lg font-semibold text-white truncate">
+                    <h3 className="text-base sm:text-lg font-semibold text-white truncate">
                       {profile.full_name || profile.username}
                     </h3>
                     {profile.is_verified && (
-                      <Verified className="w-5 h-5 ml-2 text-blue-400" />
+                      <Verified className="w-4 h-4 sm:w-5 sm:h-5 ml-1 sm:ml-2 text-blue-400 flex-shrink-0" />
                     )}
                   </div>
-                  <p className="text-sm text-white opacity-90">
+                  <p className="text-xs sm:text-sm text-white opacity-90 truncate">
                     @{profile.username}
                   </p>
                 </div>
@@ -203,22 +186,22 @@ const Profiles = ({ showNotification }) => {
             </div>
 
             {/* Profile Stats */}
-            <div className="p-6">
-              <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="p-4 sm:p-6">
+              <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
                 <div className="text-center">
-                  <div className="text-lg font-semibold text-gray-900">
+                  <div className="text-sm sm:text-lg font-semibold text-gray-900">
                     {formatNumber(profile.follower_count)}
                   </div>
                   <div className="text-xs text-gray-500">Followers</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-lg font-semibold text-gray-900">
+                  <div className="text-sm sm:text-lg font-semibold text-gray-900">
                     {formatNumber(profile.following_count)}
                   </div>
                   <div className="text-xs text-gray-500">Following</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-lg font-semibold text-gray-900">
+                  <div className="text-sm sm:text-lg font-semibold text-gray-900">
                     {formatNumber(profile.media_count)}
                   </div>
                   <div className="text-xs text-gray-500">Posts</div>
@@ -335,17 +318,8 @@ const Profiles = ({ showNotification }) => {
           <Users className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-2 text-sm font-medium text-gray-900">No profiles found</h3>
           <p className="mt-1 text-sm text-gray-500">
-            Get started by fetching profile data from Instagram.
+            Get started by adding a profile to track Instagram data.
           </p>
-          <div className="mt-6">
-            <button
-              onClick={fetchProfiles}
-              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-instagram-purple hover:bg-instagram-pink focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-instagram-purple"
-            >
-              <Users className="w-4 h-4 mr-2" />
-              Refresh Profiles
-            </button>
-          </div>
         </div>
       )}
 

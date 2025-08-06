@@ -5,7 +5,7 @@ import requests
 import pandas as pd
 import datetime
 import pytz
-from typing import Dict, List, Optional
+from typing import Dict, List, Any, Optional
 import json
 import time
 from models.database import db, Profile, MediaPost, Story, DailyMetrics
@@ -469,7 +469,7 @@ class InstagramAnalyticsService:
             print(f"Error generating performance insights: {e}")
             return {"error": str(e)}
 
-    def get_weekly_comparison(self, username: str = None, period: str = 'week') -> Dict:
+    def get_weekly_comparison(self, username: Optional[str] = None, period: str = 'week', start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
         """Get period-over-period comparison data based on most recent data."""
         try:
             # Get all posts for the username, ordered by date
@@ -493,7 +493,19 @@ class InstagramAnalyticsService:
                 current_period_start = most_recent_date - datetime.timedelta(days=30)
                 previous_period_start = current_period_start - datetime.timedelta(days=30)
                 period_label = 'Month'
-            else:  # custom - 14 days each
+            elif period == 'custom' and start_date and end_date:
+                # Parse custom dates
+                from datetime import datetime as dt
+                current_period_end = dt.strptime(end_date, '%Y-%m-%d').date()
+                current_period_start = dt.strptime(start_date, '%Y-%m-%d').date()
+                
+                # Calculate period length and create previous period
+                period_length = (current_period_end - current_period_start).days
+                previous_period_end = current_period_start
+                previous_period_start = previous_period_end - datetime.timedelta(days=period_length)
+                
+                period_label = f'Custom ({start_date} to {end_date})'
+            else:  # fallback custom - 14 days each
                 current_period_start = most_recent_date - datetime.timedelta(days=14)
                 previous_period_start = current_period_start - datetime.timedelta(days=14)
                 period_label = 'Custom (14 days)'
@@ -509,9 +521,15 @@ class InstagramAnalyticsService:
             for uname in usernames:
                 user_posts = [p for p in all_posts if p.og_username == uname]
                 
-                # Split posts into two periods relative to most recent data
-                current_period_posts = [p for p in user_posts if p.post_datetime_ist.date() > current_period_start]
-                previous_period_posts = [p for p in user_posts if previous_period_start < p.post_datetime_ist.date() <= current_period_start]
+                # Split posts into two periods
+                if period == 'custom' and start_date and end_date:
+                    # For custom dates, use exact date ranges
+                    current_period_posts = [p for p in user_posts if current_period_start <= p.post_datetime_ist.date() <= current_period_end]
+                    previous_period_posts = [p for p in user_posts if previous_period_start <= p.post_datetime_ist.date() < current_period_start]
+                else:
+                    # For week/month, use relative to most recent data
+                    current_period_posts = [p for p in user_posts if p.post_datetime_ist.date() > current_period_start]
+                    previous_period_posts = [p for p in user_posts if previous_period_start < p.post_datetime_ist.date() <= current_period_start]
                 
                 # Calculate totals for current period
                 current_total_engagement = sum(p.engagement_count for p in current_period_posts)

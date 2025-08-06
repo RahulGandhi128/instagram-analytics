@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TrendingUp, Clock, BarChart3, PieChart, Calendar, Target } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Cell, Pie } from 'recharts';
 import { analyticsAPI } from '../services/api';
+import { useUsernames } from '../hooks/useUsernames';
 
 const Analytics = ({ showNotification }) => {
   const [insights, setInsights] = useState({});
@@ -10,6 +11,10 @@ const Analytics = ({ showNotification }) => {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState(30);
   const [comparisonPeriod, setComparisonPeriod] = useState('week');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  
+  const { usernames: allUsernames } = useUsernames();
 
   const fetchAnalyticsData = async () => {
     setLoading(true);
@@ -17,8 +22,15 @@ const Analytics = ({ showNotification }) => {
       const params = { days: timeRange };
       if (selectedUsername) params.username = selectedUsername;
 
+      // Prepare comparison parameters
       const comparisonParams = { period: comparisonPeriod };
       if (selectedUsername) comparisonParams.username = selectedUsername;
+      
+      // Add custom date range if selected
+      if (comparisonPeriod === 'custom' && customStartDate && customEndDate) {
+        comparisonParams.start_date = customStartDate;
+        comparisonParams.end_date = customEndDate;
+      }
 
       const [insightsRes, weeklyRes] = await Promise.all([
         analyticsAPI.getInsights(params),
@@ -27,6 +39,15 @@ const Analytics = ({ showNotification }) => {
 
       setInsights(insightsRes.data.data);
       setWeeklyComparison(weeklyRes.data.data);
+      
+      // Debug logging
+      console.log('Analytics Data Updated:', {
+        selectedUsername,
+        timeRange,
+        comparisonPeriod,
+        customDates: comparisonPeriod === 'custom' ? { start: customStartDate, end: customEndDate } : null,
+        weeklyComparisonData: weeklyRes.data.data
+      });
     } catch (error) {
       showNotification('Error loading analytics data', 'error');
       console.error('Analytics error:', error);
@@ -37,15 +58,27 @@ const Analytics = ({ showNotification }) => {
 
   useEffect(() => {
     fetchAnalyticsData();
+    
+    // Listen for global data fetch events
+    const handleDataFetched = () => {
+      fetchAnalyticsData();
+    };
+    
+    window.addEventListener('dataFetched', handleDataFetched);
+    
+    return () => {
+      window.removeEventListener('dataFetched', handleDataFetched);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (selectedUsername || timeRange) {
+    if (selectedUsername || timeRange || comparisonPeriod || 
+        (comparisonPeriod === 'custom' && customStartDate && customEndDate)) {
       fetchAnalyticsData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUsername, timeRange]);
+  }, [selectedUsername, timeRange, comparisonPeriod, customStartDate, customEndDate]);
 
   if (loading) {
     return (
@@ -86,7 +119,7 @@ const Analytics = ({ showNotification }) => {
 
       {/* Filters */}
       <div className="bg-white p-4 rounded-lg shadow mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Account
@@ -97,7 +130,7 @@ const Analytics = ({ showNotification }) => {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-instagram-purple focus:ring-instagram-purple"
             >
               <option value="">Select Account</option>
-              {usernames.map(username => (
+              {allUsernames.map(username => (
                 <option key={username} value={username}>{username}</option>
               ))}
             </select>
@@ -133,17 +166,50 @@ const Analytics = ({ showNotification }) => {
               <option value="custom">Custom Period</option>
             </select>
           </div>
-
-          <div className="flex items-end">
-            <button
-              onClick={fetchAnalyticsData}
-              className="w-full px-4 py-2 bg-instagram-purple text-white rounded-md hover:bg-instagram-pink focus:outline-none focus:ring-2 focus:ring-instagram-purple"
-            >
-              <BarChart3 className="w-4 h-4 mr-2 inline" />
-              Refresh Analytics
-            </button>
-          </div>
         </div>
+
+        {/* Custom Date Range Picker */}
+        {comparisonPeriod === 'custom' && (
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <h4 className="text-sm font-medium text-gray-700 mb-3">Custom Date Range</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-instagram-purple focus:ring-instagram-purple"
+                  max={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-instagram-purple focus:ring-instagram-purple"
+                  max={new Date().toISOString().split('T')[0]}
+                  min={customStartDate}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Debug Info - Remove this in production */}
+      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+        <p><strong>Analytics Debug:</strong> User: "{selectedUsername || 'None'}" | Time: {timeRange}d | Comparison: {comparisonPeriod}
+          {comparisonPeriod === 'custom' && customStartDate && customEndDate && 
+            ` (${customStartDate} to ${customEndDate})`
+          }
+        </p>
       </div>
 
       {!selectedUsername ? (

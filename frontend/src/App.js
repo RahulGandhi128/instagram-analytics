@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { BarChart3, Users, TrendingUp, Download, RefreshCw } from 'lucide-react';
+import { BarChart3, Users, TrendingUp } from 'lucide-react';
 
 // Components
 import Dashboard from './pages/Dashboard';
@@ -9,27 +9,14 @@ import MediaPosts from './pages/MediaPosts';
 import Profiles from './pages/Profiles';
 
 // Services
-import { analyticsAPI } from './services/api';
+// (No longer needed since fetch is centralized)
 
 function App() {
-  const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState(null);
 
   const showNotification = (message, type = 'info') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
-  };
-
-  const handleFetchData = async () => {
-    setLoading(true);
-    try {
-      await analyticsAPI.fetchData();
-      showNotification('Data fetched successfully!', 'success');
-    } catch (error) {
-      showNotification('Error fetching data', 'error');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const navigation = [
@@ -67,16 +54,6 @@ function App() {
                     );
                   })}
                 </div>
-              </div>
-              <div className="flex items-center space-x-4">
-                <button
-                  onClick={handleFetchData}
-                  disabled={loading}
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-instagram-purple hover:bg-instagram-pink focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-instagram-purple disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                  {loading ? 'Fetching...' : 'Fetch Data'}
-                </button>
               </div>
             </div>
           </div>

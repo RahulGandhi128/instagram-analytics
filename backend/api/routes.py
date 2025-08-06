@@ -1,12 +1,14 @@
 """
 API Routes for Instagram Analytics
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from services.instagram_service import InstagramAnalyticsService
 from models.database import db, Profile, MediaPost, Story, DailyMetrics
 from sqlalchemy import func, desc
 import os
+import requests
 from datetime import datetime, timedelta
+import base64
 
 api_bp = Blueprint('api', __name__)
 
@@ -17,6 +19,48 @@ instagram_service = InstagramAnalyticsService(os.getenv('API_KEY'))
 def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+
+@api_bp.route('/proxy/image', methods=['GET'])
+def proxy_image():
+    """Proxy Instagram images to bypass CORS restrictions"""
+    try:
+        image_url = request.args.get('url')
+        if not image_url:
+            return jsonify({'error': 'URL parameter is required'}), 400
+        
+        # Validate that it's an Instagram URL for security
+        if not ('instagram.com' in image_url or 'cdninstagram.com' in image_url):
+            return jsonify({'error': 'Only Instagram URLs are allowed'}), 400
+        
+        # Fetch the image from Instagram
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(image_url, headers=headers, stream=True, timeout=10)
+        response.raise_for_status()
+        
+        # Return the image with appropriate headers
+        def generate():
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        
+        return Response(
+            generate(),
+            headers={
+                'Content-Type': response.headers.get('Content-Type', 'image/jpeg'),
+                'Content-Length': response.headers.get('Content-Length', ''),
+                'Cache-Control': 'public, max-age=3600',  # Cache for 1 hour
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            }
+        )
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to fetch image: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @api_bp.route('/profiles', methods=['POST'])
 def add_profile():
@@ -268,8 +312,10 @@ def get_weekly_comparison():
     try:
         username = request.args.get('username')
         period = request.args.get('period', 'week')  # Default to week
+        start_date = request.args.get('start_date')  # For custom period
+        end_date = request.args.get('end_date')  # For custom period
         
-        comparison = instagram_service.get_weekly_comparison(username, period)
+        comparison = instagram_service.get_weekly_comparison(username, period, start_date, end_date)
         
         return jsonify({
             'success': True,
@@ -349,27 +395,47 @@ def export_csv():
 
 @api_bp.route('/stats/summary', methods=['GET'])
 def get_summary_stats():
-    """Get summary statistics"""
+    """Get summary statistics with optional filtering"""
     try:
-        total_profiles = Profile.query.count()
-        total_posts = MediaPost.query.count()
-        total_stories = Story.query.filter(Story.expire_datetime_ist > datetime.now()).count()
+        username = request.args.get('username')
+        days = int(request.args.get('days', 30))
         
-        # Recent activity (last 7 days)
-        week_ago = datetime.now() - timedelta(days=7)
-        recent_posts = MediaPost.query.filter(MediaPost.first_fetched > week_ago).count()
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
         
-        # Top performing post this week
-        top_post = MediaPost.query.filter(
-            MediaPost.post_datetime_ist > week_ago
-        ).order_by(desc(MediaPost.like_count + MediaPost.comment_count)).first()
+        # Base queries
+        profiles_query = Profile.query
+        posts_query = MediaPost.query.filter(MediaPost.post_datetime_ist >= start_date)
+        stories_query = Story.query.filter(Story.expire_datetime_ist > datetime.now())
+        
+        # Apply username filter if specified
+        if username:
+            profiles_query = profiles_query.filter(Profile.username == username)
+            posts_query = posts_query.filter(MediaPost.og_username == username)
+            stories_query = stories_query.filter(Story.og_username == username)
+        
+        # Get counts
+        total_profiles = profiles_query.count()
+        total_posts = posts_query.count()
+        active_stories = stories_query.count()
+        
+        # Recent activity (last 7 days within the specified range)
+        week_ago = max(start_date, end_date - timedelta(days=7))
+        recent_posts_query = posts_query.filter(MediaPost.post_datetime_ist >= week_ago)
+        recent_posts = recent_posts_query.count()
+        
+        # Top performing post within the time range
+        top_post = posts_query.order_by(
+            desc(MediaPost.like_count + MediaPost.comment_count)
+        ).first()
         
         return jsonify({
             'success': True,
             'data': {
                 'total_profiles': total_profiles,
                 'total_posts': total_posts,
-                'active_stories': total_stories,
+                'active_stories': active_stories,
                 'recent_posts_week': recent_posts,
                 'top_post_week': top_post.to_dict() if top_post else None
             }

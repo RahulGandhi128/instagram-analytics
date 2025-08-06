@@ -43,7 +43,7 @@ export const analyticsAPI = {
   exportCSV: (params = {}) => api.get('/export/csv', { params }),
 
   // Summary
-  getSummaryStats: () => api.get('/stats/summary'),
+  getSummaryStats: (params = {}) => api.get('/stats/summary', { params }),
 };
 
 export default analyticsAPI;

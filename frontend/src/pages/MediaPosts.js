@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Heart, MessageCircle, Share, Play, ExternalLink, Calendar } from 'lucide-react';
 import { analyticsAPI } from '../services/api';
+import { useUsernames } from '../hooks/useUsernames';
 
 const MediaPosts = ({ showNotification }) => {
   const [posts, setPosts] = useState([]);
@@ -10,9 +11,22 @@ const MediaPosts = ({ showNotification }) => {
     mediaType: '',
     limit: 50
   });
+  
+  const { usernames } = useUsernames();
 
   useEffect(() => {
     fetchPosts();
+    
+    // Listen for global data fetch events
+    const handleDataFetched = () => {
+      fetchPosts();
+    };
+    
+    window.addEventListener('dataFetched', handleDataFetched);
+    
+    return () => {
+      window.removeEventListener('dataFetched', handleDataFetched);
+    };
   }, [filters]);
 
   const fetchPosts = async () => {
@@ -75,7 +89,7 @@ const MediaPosts = ({ showNotification }) => {
 
       {/* Filters */}
       <div className="bg-white p-4 rounded-lg shadow mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Username
@@ -86,10 +100,9 @@ const MediaPosts = ({ showNotification }) => {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-instagram-purple focus:ring-instagram-purple"
             >
               <option value="">All Accounts</option>
-              <option value="naukridotcom">naukridotcom</option>
-              <option value="swiggyindia">swiggyindia</option>
-              <option value="zomato">zomato</option>
-              <option value="instagram">instagram</option>
+              {usernames.map(username => (
+                <option key={username} value={username}>{username}</option>
+              ))}
             </select>
           </div>
           
@@ -122,15 +135,6 @@ const MediaPosts = ({ showNotification }) => {
               <option value={50}>50 posts</option>
               <option value={100}>100 posts</option>
             </select>
-          </div>
-          
-          <div className="flex items-end">
-            <button
-              onClick={fetchPosts}
-              className="w-full px-4 py-2 bg-instagram-purple text-white rounded-md hover:bg-instagram-pink focus:outline-none focus:ring-2 focus:ring-instagram-purple"
-            >
-              Apply Filters
-            </button>
           </div>
         </div>
       </div>
