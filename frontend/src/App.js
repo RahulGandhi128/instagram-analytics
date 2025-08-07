@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { BarChart3, Users, TrendingUp } from 'lucide-react';
+import { BarChart3, Users, TrendingUp, Bot } from 'lucide-react';
 
 // Components
 import Dashboard from './pages/Dashboard';
 import Analytics from './pages/Analytics';
 import MediaPosts from './pages/MediaPosts';
 import Profiles from './pages/Profiles';
+import Chatbot from './pages/Chatbot';
 
 // Services
 // (No longer needed since fetch is centralized)
@@ -24,6 +25,7 @@ function App() {
     { name: 'Analytics', href: '/analytics', icon: TrendingUp },
     { name: 'Media Posts', href: '/media', icon: Users },
     { name: 'Profiles', href: '/profiles', icon: Users },
+    { name: 'AI Assistant', href: '/chatbot', icon: Bot },
   ];
 
   return (
@@ -83,6 +85,7 @@ function App() {
             <Route path="/analytics" element={<Analytics showNotification={showNotification} />} />
             <Route path="/media" element={<MediaPosts showNotification={showNotification} />} />
             <Route path="/profiles" element={<Profiles showNotification={showNotification} />} />
+            <Route path="/chatbot" element={<Chatbot showNotification={showNotification} />} />
           </Routes>
         </main>
       </div>

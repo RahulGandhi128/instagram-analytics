@@ -3,10 +3,13 @@ API Routes for Instagram Analytics
 """
 from flask import Blueprint, request, jsonify, Response
 from services.instagram_service import InstagramAnalyticsService
+from services.chatbot_service import analytics_chatbot
 from models.database import db, Profile, MediaPost, Story, DailyMetrics
 from sqlalchemy import func, desc
 import os
 import requests
+import uuid
+import asyncio
 from datetime import datetime, timedelta
 import base64
 
@@ -440,5 +443,79 @@ def get_summary_stats():
                 'top_post_week': top_post.to_dict() if top_post else None
             }
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Chatbot endpoints
+@api_bp.route('/chatbot/chat', methods=['POST'])
+def chatbot_chat():
+    """Send a message to the analytics chatbot"""
+    try:
+        data = request.get_json()
+        message = data.get('message', '').strip()
+        session_id = data.get('session_id', str(uuid.uuid4()))
+        username = data.get('username')  # Optional filter for specific account
+        days = int(data.get('days', 30))  # Time period for analytics
+        
+        if not message:
+            return jsonify({'success': False, 'error': 'Message is required'}), 400
+        
+        # Since we can't use async in Flask directly, we'll call the sync version
+        response = analytics_chatbot.chat_sync(message, session_id, username, days)
+        
+        return jsonify({
+            'success': True,
+            'data': response
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@api_bp.route('/chatbot/history/<session_id>', methods=['GET'])
+def get_chatbot_history(session_id):
+    """Get conversation history for a session"""
+    try:
+        history = analytics_chatbot.get_conversation_history(session_id)
+        summary = analytics_chatbot.get_conversation_summary(session_id)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'history': history,
+                'summary': summary
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@api_bp.route('/chatbot/clear/<session_id>', methods=['DELETE'])
+def clear_chatbot_history(session_id):
+    """Clear conversation history for a session"""
+    try:
+        analytics_chatbot.clear_conversation(session_id)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Conversation history cleared'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@api_bp.route('/chatbot/analytics-context', methods=['GET'])
+def get_analytics_context():
+    """Get current analytics context that the chatbot uses"""
+    try:
+        username = request.args.get('username')
+        days = int(request.args.get('days', 30))
+        
+        context = analytics_chatbot.get_analytics_context(username, days)
+        
+        return jsonify({
+            'success': True,
+            'data': context
+        })
+        
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
