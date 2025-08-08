@@ -4,6 +4,8 @@ API Routes for Instagram Analytics
 from flask import Blueprint, request, jsonify, Response
 from services.instagram_service import InstagramAnalyticsService
 from services.chatbot_service import analytics_chatbot
+from services.analytics_service import AnalyticsService
+from services.calculation_methods_extractor import calculation_extractor
 from models.database import db, Profile, MediaPost, Story, DailyMetrics
 from sqlalchemy import func, desc
 import os
@@ -15,8 +17,9 @@ import base64
 
 api_bp = Blueprint('api', __name__)
 
-# Initialize the service
+# Initialize the services
 instagram_service = InstagramAnalyticsService(os.getenv('API_KEY'))
+analytics_service = AnalyticsService()
 
 @api_bp.route('/health', methods=['GET'])
 def health_check():
@@ -295,12 +298,13 @@ def get_stories():
 
 @api_bp.route('/analytics/insights', methods=['GET'])
 def get_insights():
-    """Get performance insights"""
+    """Get performance insights using centralized analytics service"""
     try:
         username = request.args.get('username')
         days = int(request.args.get('days', 30))
         
-        insights = instagram_service.get_performance_insights(username, days)
+        # Use centralized analytics service instead of instagram_service
+        insights = analytics_service.get_performance_insights(username, days)
         
         return jsonify({
             'success': True,
@@ -309,16 +313,52 @@ def get_insights():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@api_bp.route('/analytics/daily-chart', methods=['GET'])
+def get_daily_chart_data():
+    """Get daily chart data for time series visualization using centralized analytics service"""
+    try:
+        username = request.args.get('username')
+        days = int(request.args.get('days', 30))
+        
+        # Use centralized analytics service for daily chart data
+        daily_data = analytics_service.get_daily_chart_data(username, days)
+        
+        return jsonify({
+            'success': True,
+            'data': daily_data
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@api_bp.route('/analytics/comprehensive', methods=['GET'])
+def get_comprehensive_analytics():
+    """Get comprehensive analytics data including all metrics"""
+    try:
+        username = request.args.get('username')
+        days = int(request.args.get('days', 30))
+        include_sections = request.args.get('sections', '').split(',') if request.args.get('sections') else None
+        
+        # Use centralized analytics service for comprehensive data
+        analytics = analytics_service.get_comprehensive_analytics(username, days, include_sections)
+        
+        return jsonify({
+            'success': True,
+            'data': analytics
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @api_bp.route('/analytics/weekly-comparison', methods=['GET'])
 def get_weekly_comparison():
-    """Get period-over-period comparison"""
+    """Get period-over-period comparison using centralized analytics service"""
     try:
         username = request.args.get('username')
         period = request.args.get('period', 'week')  # Default to week
         start_date = request.args.get('start_date')  # For custom period
         end_date = request.args.get('end_date')  # For custom period
         
-        comparison = instagram_service.get_weekly_comparison(username, period, start_date, end_date)
+        # Use centralized analytics service instead of instagram_service
+        comparison = analytics_service.get_weekly_comparison(username, period, start_date, end_date)
         
         return jsonify({
             'success': True,
@@ -396,51 +436,118 @@ def export_csv():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@api_bp.route('/stats/summary', methods=['GET'])
-def get_summary_stats():
-    """Get summary statistics with optional filtering"""
+@api_bp.route('/dashboard/<username>', methods=['GET'])
+def get_dashboard_data(username):
+    """Get dashboard data for specific username using centralized analytics service"""
     try:
-        username = request.args.get('username')
         days = int(request.args.get('days', 30))
         
-        # Calculate date range
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
+        # Use centralized analytics service
+        analytics = analytics_service.get_comprehensive_analytics(
+            username=username, 
+            days=days,
+            include_sections=['profiles', 'posts', 'hashtags', 'media_types', 'posting_times', 'performance']
+        )
         
-        # Base queries
-        profiles_query = Profile.query
-        posts_query = MediaPost.query.filter(MediaPost.post_datetime_ist >= start_date)
-        stories_query = Story.query.filter(Story.expire_datetime_ist > datetime.now())
+        # Get profile data
+        profile_data = analytics['profiles']['profiles_data']
+        current_profile = next((p for p in profile_data if p['username'] == username), {})
         
-        # Apply username filter if specified
-        if username:
-            profiles_query = profiles_query.filter(Profile.username == username)
-            posts_query = posts_query.filter(MediaPost.og_username == username)
-            stories_query = stories_query.filter(Story.og_username == username)
+        # Extract and format dashboard data
+        posts_data = analytics['posts']['posts_data']
+        basic_stats = analytics['posts']['basic_stats']
         
-        # Get counts
-        total_profiles = profiles_query.count()
-        total_posts = posts_query.count()
-        active_stories = stories_query.count()
+        # Recent activity (last 7 days)
+        week_ago = datetime.now() - timedelta(days=7)
+        recent_posts = [p for p in posts_data if p['posted_at'] and 
+                       datetime.fromisoformat(p['posted_at'].replace('Z', '+00:00')).replace(tzinfo=None) >= week_ago]
         
-        # Recent activity (last 7 days within the specified range)
-        week_ago = max(start_date, end_date - timedelta(days=7))
-        recent_posts_query = posts_query.filter(MediaPost.post_datetime_ist >= week_ago)
-        recent_posts = recent_posts_query.count()
+        # Top performing post
+        top_post = None
+        if posts_data:
+            top_post_data = max(posts_data, key=lambda x: x['engagement'])
+            top_post = {
+                'id': top_post_data.get('link', ''),
+                'username': top_post_data['username'],
+                'og_username': top_post_data['username'],
+                'media_type': top_post_data['media_type'],
+                'like_count': top_post_data['likes'],
+                'comment_count': top_post_data['comments'],
+                'post_datetime_ist': top_post_data['posted_at'],
+                'engagement': top_post_data['engagement']
+            }
         
-        # Top performing post within the time range
-        top_post = posts_query.order_by(
-            desc(MediaPost.like_count + MediaPost.comment_count)
-        ).first()
+        # Calculate correct engagement rate
+        followers = current_profile.get('followers', 1)
+        avg_engagement = basic_stats.get('avg_engagement_per_post', 0)
+        engagement_rate = round((avg_engagement / followers) * 100, 2) if followers > 0 else 0
         
         return jsonify({
             'success': True,
             'data': {
-                'total_profiles': total_profiles,
-                'total_posts': total_posts,
-                'active_stories': active_stories,
-                'recent_posts_week': recent_posts,
-                'top_post_week': top_post.to_dict() if top_post else None
+                'total_profiles': 1,
+                'total_posts': basic_stats.get('total_posts', 0),
+                'active_stories': analytics['stories']['total_active_stories'],
+                'recent_posts_week': len(recent_posts),
+                'top_post_week': top_post,
+                'total_engagement': basic_stats.get('total_engagement', 0),
+                'avg_engagement': avg_engagement,
+                'engagement_rate': engagement_rate,
+                'followers': followers,
+                'following': current_profile.get('following', 0),
+                'profile': current_profile
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@api_bp.route('/stats/summary', methods=['GET'])
+def get_summary_stats():
+    """Get summary statistics using centralized analytics service"""
+    try:
+        username = request.args.get('username')
+        days = int(request.args.get('days', 30))
+        
+        # Use centralized analytics service
+        analytics = analytics_service.get_comprehensive_analytics(
+            username=username, 
+            days=days,
+            include_sections=['profiles', 'posts', 'stories', 'performance']
+        )
+        
+        # Extract summary data
+        posts_data = analytics['posts']['posts_data']
+        
+        # Recent activity (last 7 days)
+        week_ago = datetime.now() - timedelta(days=7)
+        recent_posts = [p for p in posts_data if p['posted_at'] and 
+                       datetime.fromisoformat(p['posted_at'].replace('Z', '+00:00')).replace(tzinfo=None) >= week_ago]
+        
+        # Top performing post
+        top_post = None
+        if posts_data:
+            top_post_data = max(posts_data, key=lambda x: x['engagement'])
+            top_post = {
+                'id': top_post_data.get('link', ''),
+                'username': top_post_data['username'],
+                'og_username': top_post_data['username'],
+                'media_type': top_post_data['media_type'],
+                'like_count': top_post_data['likes'],
+                'comment_count': top_post_data['comments'],
+                'post_datetime_ist': top_post_data['posted_at'],
+                'engagement': top_post_data['engagement']
+            }
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_profiles': analytics['metadata']['total_profiles'],
+                'total_posts': analytics['metadata']['total_posts'],
+                'active_stories': analytics['stories']['total_active_stories'],
+                'recent_posts_week': len(recent_posts),
+                'top_post_week': top_post,
+                'total_engagement': analytics['metadata']['total_engagement'],
+                'avg_engagement': analytics['posts']['basic_stats']['avg_engagement_per_post']
             }
         })
     except Exception as e:
@@ -519,3 +626,103 @@ def get_analytics_context():
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@api_bp.route('/analytics/calculation-methods', methods=['GET'])
+def get_calculation_methods():
+    """Get all calculation methods and formulas for transparency"""
+    try:
+        documentation = calculation_extractor.get_analytics_documentation()
+        
+        return jsonify({
+            'success': True,
+            'data': documentation.get('data', {}),
+            'metadata': documentation.get('metadata', {})
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'data': {}
+        }), 500
+
+# Content Creation Endpoints
+@api_bp.route('/content/create', methods=['POST'])
+def create_content():
+    """Create content using AI/LLM services"""
+    try:
+        from content_creation import create_content_endpoint
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Run the async function
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(create_content_endpoint(data))
+        finally:
+            loop.close()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'content_id': '',
+            'content_type': data.get('content_type', 'unknown') if 'data' in locals() else 'unknown',
+            'error': str(e),
+            'debug_info': {'endpoint_error': str(e)}
+        }), 500
+
+@api_bp.route('/content/conversation/<session_id>', methods=['GET'])
+def get_conversation_history(session_id):
+    """Get conversation history for a session"""
+    try:
+        from content_creation import get_conversation_history_endpoint
+        
+        # Run the async function
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(get_conversation_history_endpoint(session_id))
+        finally:
+            loop.close()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'history': []
+        }), 500
+
+@api_bp.route('/content/analytics-context/<username>', methods=['GET'])
+def get_analytics_context_for_content(username):
+    """Get analytics context for content creation"""
+    try:
+        # Get comprehensive analytics for the user
+        analytics_data = analytics_service.get_comprehensive_analytics(username)
+        
+        # Also get performance insights for additional context
+        insights = analytics_service.get_performance_insights(username, days=30)
+        
+        # Combine the data for content creation context
+        context = {
+            'username': username,
+            'analytics': analytics_data,
+            'insights': insights,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            'success': True,
+            'context': context
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'context': {}
+        }), 500

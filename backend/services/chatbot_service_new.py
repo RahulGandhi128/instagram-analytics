@@ -242,7 +242,3 @@ Remember: This data covers the last {period_days} days for {username_filter}. Al
             'average_exchanges_per_session': total_exchanges / total_sessions if total_sessions > 0 else 0,
             'memory_usage_mb': len(str(self.conversation_memory)) / (1024 * 1024)
         }
-
-
-# Global instance for backward compatibility
-analytics_chatbot = AnalyticsChatBot()

@@ -1,3 +1,57 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Custom styles for comparison page */
+.comparison-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.comparison-grid-2 {
+  grid-template-columns: repeat(1, 1fr);
+}
+
+@media (min-width: 1280px) {
+  .comparison-grid-2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.comparison-grid-3 {
+  grid-template-columns: repeat(1, 1fr);
+}
+
+@media (min-width: 1024px) {
+  .comparison-grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .comparison-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Print styles for export functionality */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .comparison-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 1rem;
+  }
+  
+  .bg-gradient-to-r {
+    background: #8B5CF6 !important;
+    color: white !important;
+  }
+  
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

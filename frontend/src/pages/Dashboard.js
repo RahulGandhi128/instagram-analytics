@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, MessageCircle, Heart, TrendingUp, BarChart, Download } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart as RechartsBarChart, Bar, ComposedChart } from 'recharts';
+import { Users, MessageCircle, Heart, TrendingUp, BarChart, Download, Info } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart as RechartsBarChart, Bar, ComposedChart, PieChart, Pie, Cell } from 'recharts';
 import { analyticsAPI } from '../services/api';
 import { useUsernames } from '../hooks/useUsernames';
+import { useNavigate } from 'react-router-dom';
 
 const Dashboard = ({ showNotification }) => {
+  const navigate = useNavigate();
   const [summaryStats, setSummaryStats] = useState(null);
   const [dailyMetrics, setDailyMetrics] = useState([]);
   const [insights, setInsights] = useState({});
@@ -16,6 +18,7 @@ const Dashboard = ({ showNotification }) => {
   const [hashtagData, setHashtagData] = useState([]);
   const [cumulativeHashtagData, setCumulativeHashtagData] = useState([]);
   const [mediaPostsData, setMediaPostsData] = useState([]);
+  const [comprehensiveAnalytics, setComprehensiveAnalytics] = useState(null);
   
   const { usernames: allUsernames } = useUsernames();
 
@@ -25,212 +28,68 @@ const Dashboard = ({ showNotification }) => {
       const params = { days: chartTimeRange };
       if (selectedUsername) params.username = selectedUsername;
 
-      const [summaryRes, mediaRes, insightsRes] = await Promise.all([
-        analyticsAPI.getSummaryStats(params), // Add params to summary stats
+      // Use centralized analytics service for all data
+      const [summaryRes, mediaRes, insightsRes, dailyChartRes, comprehensiveRes] = await Promise.all([
+        analyticsAPI.getSummaryStats(params),
         analyticsAPI.getMedia(params),
-        analyticsAPI.getInsights(params)
+        analyticsAPI.getInsights(params),
+        // New: Get daily chart data from analytics service
+        fetch(`http://localhost:5000/api/analytics/daily-chart?${new URLSearchParams(params)}`).then(r => r.json()),
+        // New: Get comprehensive analytics data
+        fetch(`http://localhost:5000/api/analytics/comprehensive?${new URLSearchParams(params)}`).then(r => r.json())
       ]);
 
       setSummaryStats(summaryRes.data.data);
       
-      // Store media posts data for hashtag analysis
+      // Store media posts data for compatibility (minimal usage now)
       const mediaData = mediaRes.data.data || [];
       setMediaPostsData(mediaData);
       
-      // Generate chart data from media posts with full date range
-      const chartData = generateChartData(mediaData, params.days);
-      setDailyMetrics(chartData);
+      // Use analytics service data instead of local calculations
+      if (dailyChartRes.success) {
+        setDailyMetrics(dailyChartRes.data);
+      }
       
-      // Generate hashtag performance data
-      const hashtags = generateHashtagData(mediaData, params.days);
-      setHashtagData(hashtags);
+      // Extract hashtag data from comprehensive analytics
+      if (comprehensiveRes.success && comprehensiveRes.data.hashtags) {
+        const hashtagAnalytics = comprehensiveRes.data.hashtags;
+        // Use trending_hashtags which has proper structure for charts
+        const trendingData = hashtagAnalytics.trending_hashtags || [];
+        setHashtagData(trendingData.map(tag => ({
+          hashtag: tag.hashtag.replace('#', ''),
+          posts: tag.total_posts,
+          totalEngagement: tag.total_engagement,
+          avgEngagement: Math.round(tag.avg_engagement),
+          engagement_display: tag.engagement_display
+        })));
+        setCumulativeHashtagData(hashtagAnalytics.top_hashtags || []);
+      }
       
-      // Generate cumulative hashtag performance data
-      const cumulativeHashtags = generateCumulativeHashtagData(mediaData, params.days);
-      setCumulativeHashtagData(cumulativeHashtags);
+      // Store comprehensive analytics for performance metrics
+      if (comprehensiveRes.success) {
+        setComprehensiveAnalytics(comprehensiveRes.data);
+      }
       
       setInsights(insightsRes.data.data);
       
-      // Debug logging for chart data
-      console.log('Dashboard Data Updated:', {
+      // Debug logging for analytics service data
+      console.log('Dashboard Data Updated (Centralized):', {
         selectedUsername,
         chartTimeRange,
-        metricsCount: chartData?.length || 0,
-        mediaPostsCount: mediaRes.data.data?.length || 0,
-        sampleMetric: chartData?.[0]
+        dailyMetricsCount: dailyChartRes.data?.length || 0,
+        hashtagCount: comprehensiveRes.data?.hashtags?.trending_hashtags?.length || 0,
+        comprehensiveData: comprehensiveRes.data?.metadata
       });
     } catch (error) {
+      console.error('Error loading centralized dashboard data:', error);
       showNotification('Error loading dashboard data', 'error');
     } finally {
       setLoading(false);
     }
   }, [chartTimeRange, selectedUsername, showNotification]);
 
-  // Generate chart data with full date range from media posts
-  const generateChartData = (mediaData, days) => {
-    const chartData = [];
-    const endDate = new Date();
-    
-    // Create array of all dates in the selected range
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(endDate.getDate() - i);
-      const dateKey = date.toISOString().split('T')[0];
-      
-      chartData.push({
-        date: dateKey,
-        total_engagement: 0,
-        posts_count: 0,
-        avg_engagement_per_post: 0,
-        total_likes: 0,
-        total_comments: 0
-      });
-    }
-    
-    // Aggregate media data by date
-    mediaData.forEach(post => {
-      if (post.post_datetime_ist) {
-        const postDate = new Date(post.post_datetime_ist).toISOString().split('T')[0];
-        const dayData = chartData.find(day => day.date === postDate);
-        
-        if (dayData) {
-          dayData.posts_count += 1;
-          dayData.total_engagement += (post.like_count || 0) + (post.comment_count || 0);
-          dayData.total_likes += (post.like_count || 0);
-          dayData.total_comments += (post.comment_count || 0);
-        }
-      }
-    });
-    
-    // Calculate averages for days with posts
-    chartData.forEach(day => {
-      if (day.posts_count > 0) {
-        day.avg_engagement_per_post = Math.round(day.total_engagement / day.posts_count);
-      }
-    });
-    
-    return chartData;
-  };
-
-  // Generate hashtag performance data from media posts
-  const generateHashtagData = (mediaData, days) => {
-    const hashtagPerformance = {};
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    
-    console.log('Generating hashtag data:', { 
-      totalPosts: mediaData.length, 
-      cutoffDate: cutoffDate.toDateString() 
-    });
-    
-    let postsWithCaptions = 0;
-    let totalHashtagsFound = 0;
-    
-    mediaData.forEach(post => {
-      // Filter by date range
-      if (post.post_datetime_ist && new Date(post.post_datetime_ist) < cutoffDate) {
-        return;
-      }
-      
-      // Extract hashtags from caption
-      if (post.caption) {
-        postsWithCaptions++;
-        const hashtags = post.caption.match(/#\w+/g) || [];
-        totalHashtagsFound += hashtags.length;
-        
-        hashtags.forEach(hashtag => {
-          const cleanHashtag = hashtag.toLowerCase();
-          if (!hashtagPerformance[cleanHashtag]) {
-            hashtagPerformance[cleanHashtag] = {
-              hashtag: cleanHashtag,
-              posts: 0,
-              totalEngagement: 0,
-              totalLikes: 0,
-              totalComments: 0,
-              avgEngagement: 0,
-              usageCount: 0
-            };
-          }
-          
-          hashtagPerformance[cleanHashtag].posts += 1;
-          hashtagPerformance[cleanHashtag].usageCount += 1; // Count each usage
-          hashtagPerformance[cleanHashtag].totalEngagement += (post.like_count || 0) + (post.comment_count || 0);
-          hashtagPerformance[cleanHashtag].totalLikes += (post.like_count || 0);
-          hashtagPerformance[cleanHashtag].totalComments += (post.comment_count || 0);
-        });
-      }
-    });
-    
-    console.log('Hashtag analysis:', { 
-      postsWithCaptions, 
-      totalHashtagsFound, 
-      uniqueHashtags: Object.keys(hashtagPerformance).length 
-    });
-    
-    // Calculate averages and return top hashtags
-    const hashtagArray = Object.values(hashtagPerformance).map(data => ({
-      ...data,
-      avgEngagement: data.posts > 0 ? Math.round(data.totalEngagement / data.posts) : 0
-    }));
-    
-    // Return top 10 hashtags by engagement (lowered minimum posts to 1)
-    const filteredHashtags = hashtagArray
-      .filter(h => h.posts >= 1) // Only hashtags used in 1+ posts
-      .sort((a, b) => b.avgEngagement - a.avgEngagement)
-      .slice(0, 10);
-    
-    console.log('Top hashtags:', filteredHashtags);
-    
-    return filteredHashtags;
-  };
-
-  // Generate cumulative hashtag data (total engagement, not average)
-  const generateCumulativeHashtagData = (mediaData, days) => {
-    const hashtagPerformance = {};
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    
-    mediaData.forEach(post => {
-      // Filter by date range
-      if (post.post_datetime_ist && new Date(post.post_datetime_ist) < cutoffDate) {
-        return;
-      }
-      
-      // Extract hashtags from caption
-      if (post.caption) {
-        const hashtags = post.caption.match(/#\w+/g) || [];
-        
-        hashtags.forEach(hashtag => {
-          const cleanHashtag = hashtag.toLowerCase();
-          if (!hashtagPerformance[cleanHashtag]) {
-            hashtagPerformance[cleanHashtag] = {
-              hashtag: cleanHashtag,
-              totalEngagement: 0,
-              usageCount: 0,
-              totalLikes: 0,
-              totalComments: 0
-            };
-          }
-          
-          hashtagPerformance[cleanHashtag].usageCount += 1; // Count each usage
-          hashtagPerformance[cleanHashtag].totalEngagement += (post.like_count || 0) + (post.comment_count || 0);
-          hashtagPerformance[cleanHashtag].totalLikes += (post.like_count || 0);
-          hashtagPerformance[cleanHashtag].totalComments += (post.comment_count || 0);
-        });
-      }
-    });
-    
-    // Return top 10 hashtags by total engagement
-    const hashtagArray = Object.values(hashtagPerformance);
-    const filteredHashtags = hashtagArray
-      .filter(h => h.usageCount >= 1)
-      .sort((a, b) => b.totalEngagement - a.totalEngagement)
-      .slice(0, 10);
-    
-    console.log('Top cumulative hashtags:', filteredHashtags);
-    
-    return filteredHashtags;
-  };
+  // Remove local calculations - now using centralized analytics service
+  // All data processing is handled by the backend analytics service
 
   useEffect(() => {
     fetchDashboardData();
@@ -321,7 +180,6 @@ const Dashboard = ({ showNotification }) => {
     );
   }
 
-  const usernames = Object.keys(insights);
   const currentUserInsights = selectedUsername && insights[selectedUsername] ? insights[selectedUsername] : null;
 
   // Filter insights data by time range if available
@@ -517,6 +375,13 @@ const Dashboard = ({ showNotification }) => {
             <Download className="w-4 h-4 mr-2" />
             Export CSV
           </button>
+          <button
+            onClick={() => navigate('/more-info')}
+            className="inline-flex items-center px-4 py-2 border border-purple-300 rounded-md shadow-sm text-sm font-medium text-purple-700 bg-purple-50 hover:bg-purple-100"
+          >
+            <Info className="w-4 h-4 mr-2" />
+            More Info
+          </button>
         </div>
       </div>
 
@@ -526,6 +391,246 @@ const Dashboard = ({ showNotification }) => {
         <p><strong>Date Range:</strong> {processedDailyMetrics[0]?.date} to {processedDailyMetrics[processedDailyMetrics.length - 1]?.date}</p>
         <p><strong>Posts Found:</strong> {processedDailyMetrics.reduce((sum, day) => sum + day.posts_count, 0)} total posts | Unique Hashtags: {hashtagData.length} | Total Hashtag Usage: {cumulativeHashtagData.reduce((sum, h) => sum + h.usageCount, 0)}</p>
       </div>
+
+      {/* NEW: Metrics Mentra Overview Dashboard */}
+      {filteredInsights && (
+        <div className="mb-8">
+          <h3 className="text-xl font-bold text-gray-900 mb-6">📊 Metrics Mentra - Overview Dashboard</h3>
+          
+          {/* Primary Metrics Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {/* Total Content */}
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-blue-100 text-sm">Total Content</p>
+                  <p className="text-2xl font-bold">
+                    {filteredInsights.basic_stats?.total_content || filteredInsights.basic_stats?.total_posts || 0}
+                  </p>
+                  <p className="text-blue-100 text-xs">Post + Carousel + Reels</p>
+                </div>
+                <BarChart className="h-8 w-8 text-blue-200" />
+              </div>
+            </div>
+
+            {/* Total Engagement */}
+            <div className="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-green-100 text-sm">Total Engagement</p>
+                  <p className="text-2xl font-bold">
+                    {(filteredInsights.basic_stats?.extended_engagement || filteredInsights.basic_stats?.total_engagement || 0).toLocaleString()}
+                  </p>
+                  <p className="text-green-100 text-xs">Likes + Comments + Shares</p>
+                </div>
+                <Heart className="h-8 w-8 text-green-200" />
+              </div>
+            </div>
+
+            {/* Engagement Per Content */}
+            <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-purple-100 text-sm">Engagement Per Content</p>
+                  <p className="text-2xl font-bold">
+                    {Math.round(filteredInsights.basic_stats?.engagement_per_content || filteredInsights.basic_stats?.avg_engagement_per_post || 0)}
+                  </p>
+                  <p className="text-purple-100 text-xs">Average per piece</p>
+                </div>
+                <TrendingUp className="h-8 w-8 text-purple-200" />
+              </div>
+            </div>
+
+            {/* Top Performers Count */}
+            <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-orange-100 text-sm">Top Performers</p>
+                  <p className="text-2xl font-bold">
+                    {filteredInsights.top_performers_count || 0}
+                  </p>
+                  <p className="text-orange-100 text-xs">Above avg engagement</p>
+                </div>
+                <Users className="h-8 w-8 text-orange-200" />
+              </div>
+            </div>
+          </div>
+
+          {/* Secondary Metrics Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            {/* Total Likes */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="text-center">
+                <Heart className="h-6 w-6 text-red-500 mx-auto mb-2" />
+                <p className="text-gray-600 text-sm">Total Likes</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {(filteredInsights.basic_stats?.total_likes || 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Total Comments */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="text-center">
+                <MessageCircle className="h-6 w-6 text-blue-500 mx-auto mb-2" />
+                <p className="text-gray-600 text-sm">Total Comments</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {(filteredInsights.basic_stats?.total_comments || 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Collab Content */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="text-center">
+                <Users className="h-6 w-6 text-green-500 mx-auto mb-2" />
+                <p className="text-gray-600 text-sm">Collab Content</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {filteredInsights.basic_stats?.collab_content_count || 0}
+                </p>
+              </div>
+            </div>
+
+            {/* Average Reel Views */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="text-center">
+                <TrendingUp className="h-6 w-6 text-purple-500 mx-auto mb-2" />
+                <p className="text-gray-600 text-sm">Avg Reel Views</p>
+                <p className="text-xl font-bold text-gray-900">
+                  {Math.round(filteredInsights.basic_stats?.average_reel_view || 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Favoured Content Type */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="text-center">
+                <BarChart className="h-6 w-6 text-indigo-500 mx-auto mb-2" />
+                <p className="text-gray-600 text-sm">Favoured Mode</p>
+                <p className="text-lg font-bold text-gray-900 capitalize">
+                  {(() => {
+                    // Use comprehensive analytics if available
+                    if (comprehensiveAnalytics?.media_types?.best_performing_type && 
+                        comprehensiveAnalytics.media_types.best_performing_type !== 'post') {
+                      return comprehensiveAnalytics.media_types.best_performing_type;
+                    }
+                    
+                    // Fallback: Calculate from breakdown, excluding 'post'
+                    const breakdown = filteredInsights.basic_stats?.content_type_breakdown || {};
+                    const validTypes = Object.entries(breakdown).filter(([type, count]) => type !== 'post' && count > 0);
+                    
+                    if (validTypes.length === 0) return 'N/A';
+                    
+                    // Find the type with highest count
+                    const [bestType] = validTypes.reduce((max, current) => 
+                      current[1] > max[1] ? current : max
+                    );
+                    
+                    return bestType;
+                  })()}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Content Type Breakdown Chart */}
+          {filteredInsights.basic_stats?.content_type_breakdown && (
+            <div className="bg-white p-6 rounded-lg shadow mb-6">
+              <h4 className="text-lg font-medium text-gray-900 mb-4">📊 Content Type Distribution</h4>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Distribution Grid */}
+                <div className="grid grid-cols-1 gap-4">
+                  {Object.entries(filteredInsights.basic_stats.content_type_breakdown)
+                    .filter(([type, count]) => type !== 'post' && count > 0) // Exclude 'post' and zero counts
+                    .map(([type, count]) => (
+                    <div key={type} className="text-center p-4 bg-gray-50 rounded-lg">
+                      <p className="text-sm text-gray-600 capitalize">{type}</p>
+                      <p className="text-2xl font-bold text-gray-900">{count}</p>
+                      <p className="text-xs text-gray-500">
+                        {(filteredInsights.basic_stats.content_engagement_breakdown?.[type] || 0).toLocaleString()} engagement
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pie Chart */}
+                <div className="flex flex-col items-center">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={Object.entries(filteredInsights.basic_stats.content_type_breakdown)
+                          .filter(([type, count]) => type !== 'post' && count > 0) // Exclude 'post' and zero counts
+                          .map(([type, count]) => ({
+                            name: type,
+                            value: count,
+                            engagement: filteredInsights.basic_stats.content_engagement_breakdown?.[type] || 0
+                          }))}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {Object.entries(filteredInsights.basic_stats.content_type_breakdown)
+                          .filter(([type, count]) => type !== 'post' && count > 0) // Exclude 'post' and zero counts
+                          .map((entry, index) => {
+                          const colors = ['#E1306C', '#FF6B35', '#4285F4', '#34A853', '#9C27B0'];
+                          return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                        })}
+                      </Pie>
+                      <Tooltip 
+                        formatter={(value, name, props) => [
+                          `${value} posts`,
+                          `${props.payload.name} (${props.payload.engagement.toLocaleString()} engagement)`
+                        ]}
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <p className="text-xs text-gray-500 text-center mt-2">
+                    Content type distribution by post count (Carousel & Reel)
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Missing Data Notice */}
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+            <h4 className="text-sm font-medium text-yellow-800 mb-2">📊 Metrics Mentra - Data Availability Status</h4>
+            <div className="text-xs text-yellow-700 grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div>
+                <p className="font-medium mb-1">✅ Available Metrics:</p>
+                <p>• Total Content, Engagement, Likes, Comments</p>
+                <p>• Content Type Distribution (Post/Carousel/Reels)</p>
+                <p>• Collaboration Content Count</p>
+                <p>• Hashtag Performance Analysis</p>
+                <p>• Top/Bottom Performers</p>
+                <p>• Time Series Engagement Trends</p>
+              </div>
+              <div>
+                <p className="font-medium mb-1">⚠️ Limited Metrics:</p>
+                <p>• Reel Views (using available play_count)</p>
+                <p>• Shares (using reshare_count)</p>
+                <p>• Posting Time Analysis (estimated)</p>
+              </div>
+              <div>
+                <p className="font-medium mb-1">❌ Missing (Requires Business API):</p>
+                <p>• Total Reach & Impressions</p>
+                <p>• Impression Per Content</p>
+                <p>• Detailed Time Analytics</p>
+                <p>• Story Metrics</p>
+              </div>
+            </div>
+            <div className="mt-3 p-2 bg-yellow-100 rounded text-center">
+              <p className="text-xs text-yellow-800 font-medium">
+                💡 To unlock full analytics, upgrade to Instagram Business API access
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Summary Stats Cards */}
       {filteredSummaryStats && (
@@ -630,7 +735,13 @@ const Dashboard = ({ showNotification }) => {
                 interval="preserveStartEnd"
               />
               <YAxis yAxisId="left" />
-              <YAxis yAxisId="right" orientation="right" />
+              <YAxis 
+                yAxisId="right" 
+                orientation="right" 
+                domain={[0, 'dataMax']}
+                tickFormatter={(value) => Math.round(value)}
+                allowDecimals={false}
+              />
               <Tooltip 
                 labelFormatter={(label, payload) => {
                   if (payload && payload[0]) {
@@ -669,7 +780,172 @@ const Dashboard = ({ showNotification }) => {
             Posts vs Engagement ({chartTimeRange} days)
           </h3>
           <ResponsiveContainer width="100%" height={400}>
-            <RechartsBarChart data={processedDailyMetrics}>
+            <ComposedChart data={processedDailyMetrics}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis 
+                dataKey="date" 
+                angle={chartTimeRange > 14 ? -45 : 0}
+                textAnchor={chartTimeRange > 14 ? 'end' : 'middle'}
+                height={chartTimeRange > 14 ? 80 : 60}
+                interval="preserveStartEnd"
+              />
+              <YAxis yAxisId="left" />
+              <YAxis 
+                yAxisId="right" 
+                orientation="right" 
+                domain={[0, 'dataMax']}
+                tickFormatter={(value) => Math.round(value)}
+                allowDecimals={false}
+              />
+              <Tooltip 
+                formatter={(value, name) => [
+                  name === 'posts_count' ? `${Math.round(value)} posts` : value,
+                  name === 'posts_count' ? 'Posts Count' : 'Avg Engagement per Post'
+                ]}
+              />
+              <Legend />
+              <Bar 
+                yAxisId="right"
+                dataKey="posts_count" 
+                fill="#8884d8" 
+                name="Posts Count" 
+                barSize={30}
+              />
+              <Line 
+                yAxisId="left"
+                type="monotone" 
+                dataKey="avg_engagement_per_post" 
+                stroke="#82ca9d" 
+                strokeWidth={3}
+                name="Avg Engagement per Post"
+                connectNulls={false}
+                dot={{ fill: '#82ca9d', strokeWidth: 2, r: 4 }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Charts - Second Row: Trending Hashtag Analysis */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* NEW: Trending Hashtags Analysis Table */}
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            🔥 Trending Hashtags Analysis ({chartTimeRange} days)
+          </h3>
+          {hashtagData.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Hashtag
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Posts
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Engagement
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Avg
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {hashtagData.slice(0, 8).map((hashtag, index) => (
+                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <span className="text-sm font-medium text-instagram-purple">
+                            #{hashtag.hashtag}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                        {hashtag.posts} posts
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                        {hashtag.totalEngagement >= 1000 
+                          ? `${(hashtag.totalEngagement / 1000).toFixed(1)}k`
+                          : hashtag.totalEngagement
+                        }
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                        {Math.round(hashtag.avgEngagement)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <p className="text-lg">No hashtag data available</p>
+                <p className="text-sm mt-2">Add captions with hashtags to your posts to see trending analysis</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Hashtag Engagement Distribution (Bar Chart) */}
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            📊 Hashtag Engagement Distribution ({chartTimeRange} days)
+          </h3>
+          {hashtagData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <RechartsBarChart data={hashtagData.slice(0, 6)}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  dataKey="hashtag" 
+                  angle={-45}
+                  textAnchor="end"
+                  height={100}
+                  fontSize={12}
+                />
+                <YAxis />
+                <Tooltip 
+                  formatter={(value, name, props) => {
+                    // Use dataKey to distinguish between bars
+                    if (props.dataKey === 'avgEngagement') {
+                      return [`${Math.round(value)} avg`, 'Avg Engagement'];
+                    } else if (props.dataKey === 'totalEngagement') {
+                      return [`${value}`, 'Total Engagement'];
+                    }
+                    return [value, name];
+                  }}
+                  labelFormatter={(label) => {
+                    const hashtag = hashtagData.find(h => h.hashtag === label);
+                    return `#${label} (${hashtag?.posts || 0} posts)`;
+                  }}
+                />
+                <Legend />
+                <Bar dataKey="totalEngagement" fill="#E1306C" name="Total Engagement" />
+                <Bar dataKey="avgEngagement" fill="#FF6B35" name="Avg Engagement" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <p className="text-lg">No hashtag data available</p>
+                <p className="text-sm mt-2">Add captions with hashtags to your posts to see distribution</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Charts - Third Row: Time Series Analysis */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Engagement Trend Line Chart */}
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            📈 Engagement Trend (Time Series)
+          </h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={processedDailyMetrics}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis 
                 dataKey="date" 
@@ -680,83 +956,316 @@ const Dashboard = ({ showNotification }) => {
               />
               <YAxis />
               <Tooltip 
-                formatter={(value, name) => [value, name]}
+                labelFormatter={(label, payload) => {
+                  if (payload && payload[0]) {
+                    const data = payload[0].payload;
+                    return `${label} (${data.posts_count} posts)`;
+                  }
+                  return label;
+                }}
               />
               <Legend />
-              <Bar dataKey="posts_count" fill="#8884d8" name="Posts Count" />
-              <Bar dataKey="avg_engagement_per_post" fill="#82ca9d" name="Avg Engagement per Post" />
-            </RechartsBarChart>
+              <Line 
+                type="monotone" 
+                dataKey="total_engagement" 
+                stroke="#8884d8" 
+                strokeWidth={3}
+                name="Total Engagement"
+                dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="avg_engagement_per_post" 
+                stroke="#82ca9d" 
+                strokeWidth={2}
+                name="Avg Engagement per Post"
+                dot={{ fill: '#82ca9d', strokeWidth: 2, r: 3 }}
+              />
+            </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
 
-      {/* Charts - Second Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Unique Hashtag Performance */}
+        {/* Content Type Performance */}
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
-            Top Unique Hashtags - Average Engagement ({chartTimeRange} days)
+            🎯 Content Type Performance
           </h3>
-          {hashtagData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={400}>
-              <RechartsBarChart data={hashtagData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="hashtag" 
-                  angle={-45}
-                  textAnchor="end"
-                  height={100}
-                  fontSize={12}
-                />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value, name) => [value, name]}
-                  labelFormatter={(label) => `${label} (used in ${hashtagData.find(h => h.hashtag === label)?.posts || 0} posts)`}
-                />
-                <Legend />
-                <Bar dataKey="avgEngagement" fill="#E1306C" name="Avg Engagement per Post" />
-              </RechartsBarChart>
-            </ResponsiveContainer>
+          {(comprehensiveAnalytics?.media_types?.performance_by_type || (filteredInsights && filteredInsights.basic_stats?.content_type_breakdown)) ? (
+            <div className="space-y-4">
+              {/* Use comprehensive analytics if available, otherwise fall back to filtered insights */}
+              {comprehensiveAnalytics?.media_types?.performance_by_type 
+                ? Object.entries(comprehensiveAnalytics.media_types.performance_by_type)
+                    .filter(([type, stats]) => type !== 'post' && stats.count > 0)
+                    .map(([type, stats]) => (
+                    <div key={type} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900 capitalize">{type}</p>
+                        <p className="text-xs text-gray-500">{stats.count} posts • {stats.total_engagement.toLocaleString()} total engagement</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-gray-900">{Math.round(stats.avg_engagement)}</p>
+                        <p className="text-xs text-gray-500">avg engagement</p>
+                      </div>
+                    </div>
+                  ))
+                : Object.entries(filteredInsights.basic_stats.content_type_breakdown)
+                    .filter(([type, count]) => type !== 'post' && count > 0)
+                    .map(([type, count]) => {
+                    const engagement = filteredInsights.basic_stats.content_engagement_breakdown?.[type] || 0;
+                    const avgEngagement = count > 0 ? Math.round(engagement / count) : 0;
+                    return (
+                      <div key={type} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900 capitalize">{type}</p>
+                          <p className="text-xs text-gray-500">{count} posts • {engagement.toLocaleString()} total engagement</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-gray-900">{avgEngagement}</p>
+                          <p className="text-xs text-gray-500">avg engagement</p>
+                        </div>
+                      </div>
+                    );
+                  })
+              }
+              
+              {/* Favoured Mode Highlight */}
+              <div className="mt-4 p-3 bg-gradient-to-r from-instagram-purple to-instagram-pink text-white rounded-lg">
+                <p className="text-sm">🏆 Favoured Mode of Posting</p>
+                <p className="text-lg font-bold capitalize">
+                  {(() => {
+                    // Use comprehensive analytics if available
+                    if (comprehensiveAnalytics?.media_types?.best_performing_type && 
+                        comprehensiveAnalytics.media_types.best_performing_type !== 'post') {
+                      return comprehensiveAnalytics.media_types.best_performing_type;
+                    }
+                    
+                    // Fallback: Calculate from breakdown, excluding 'post'
+                    const breakdown = filteredInsights?.basic_stats?.content_type_breakdown || {};
+                    const validTypes = Object.entries(breakdown).filter(([type, count]) => type !== 'post' && count > 0);
+                    
+                    if (validTypes.length === 0) return 'N/A';
+                    
+                    // Find the type with highest count
+                    const [bestType] = validTypes.reduce((max, current) => 
+                      current[1] > max[1] ? current : max
+                    );
+                    
+                    return bestType;
+                  })()}
+                </p>
+              </div>
+            </div>
           ) : (
             <div className="h-64 flex items-center justify-center text-gray-500">
               <div className="text-center">
-                <p className="text-lg">No hashtag data available</p>
-                <p className="text-sm mt-2">Add captions with hashtags to your posts to see hashtag performance</p>
+                <p className="text-lg">No content type data available</p>
+                <p className="text-sm mt-2">Post content to see performance breakdown</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Charts - Fourth Row: Time Analysis and Advanced Metrics */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Time of Day Analysis */}
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            🕐 Favoured Time of Posting Analysis
+          </h3>
+          {(comprehensiveAnalytics?.posting_times || filteredInsights?.optimal_posting_times) ? (
+            <div className="space-y-4">
+              {/* Time Period Stats from Analytics Service */}
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                {comprehensiveAnalytics?.posting_times?.optimal_posting_analysis?.time_period_breakdown ? (
+                  <>
+                    <div className="text-center p-3 bg-yellow-50 rounded-lg">
+                      <p className="text-yellow-600 text-sm">Morning</p>
+                      <p className="text-xl font-bold text-yellow-800">
+                        {comprehensiveAnalytics.posting_times.optimal_posting_analysis.time_period_breakdown.morning?.percentage || 0}%
+                      </p>
+                      <p className="text-xs text-yellow-600">6AM - 12PM</p>
+                    </div>
+                    <div className="text-center p-3 bg-orange-50 rounded-lg">
+                      <p className="text-orange-600 text-sm">Afternoon</p>
+                      <p className="text-xl font-bold text-orange-800">
+                        {comprehensiveAnalytics.posting_times.optimal_posting_analysis.time_period_breakdown.afternoon?.percentage || 0}%
+                      </p>
+                      <p className="text-xs text-orange-600">12PM - 6PM</p>
+                    </div>
+                    <div className="text-center p-3 bg-purple-50 rounded-lg">
+                      <p className="text-purple-600 text-sm">Evening</p>
+                      <p className="text-xl font-bold text-purple-800">
+                        {comprehensiveAnalytics.posting_times.optimal_posting_analysis.time_period_breakdown.evening?.percentage || 0}%
+                      </p>
+                      <p className="text-xs text-purple-600">6PM - 12AM</p>
+                    </div>
+                  </>
+                ) : filteredInsights.optimal_posting_times?.time_period_breakdown ? (
+                  <>
+                    <div className="text-center p-3 bg-yellow-50 rounded-lg">
+                      <p className="text-yellow-600 text-sm">Morning</p>
+                      <p className="text-xl font-bold text-yellow-800">
+                        {filteredInsights.optimal_posting_times.time_period_breakdown.morning?.percentage || 0}%
+                      </p>
+                      <p className="text-xs text-yellow-600">6AM - 12PM</p>
+                    </div>
+                    <div className="text-center p-3 bg-orange-50 rounded-lg">
+                      <p className="text-orange-600 text-sm">Afternoon</p>
+                      <p className="text-xl font-bold text-orange-800">
+                        {filteredInsights.optimal_posting_times.time_period_breakdown.afternoon?.percentage || 0}%
+                      </p>
+                      <p className="text-xs text-orange-600">12PM - 6PM</p>
+                    </div>
+                    <div className="text-center p-3 bg-purple-50 rounded-lg">
+                      <p className="text-purple-600 text-sm">Evening</p>
+                      <p className="text-xl font-bold text-purple-800">
+                        {filteredInsights.optimal_posting_times.time_period_breakdown.evening?.percentage || 0}%
+                      </p>
+                      <p className="text-xs text-purple-600">6PM - 12AM</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-center p-3 bg-gray-100 rounded-lg">
+                      <p className="text-gray-600 text-sm">Morning</p>
+                      <p className="text-xl font-bold text-gray-800">N/A</p>
+                      <p className="text-xs text-gray-600">6AM - 12PM</p>
+                    </div>
+                    <div className="text-center p-3 bg-gray-100 rounded-lg">
+                      <p className="text-gray-600 text-sm">Afternoon</p>
+                      <p className="text-xl font-bold text-gray-800">N/A</p>
+                      <p className="text-xs text-gray-600">12PM - 6PM</p>
+                    </div>
+                    <div className="text-center p-3 bg-gray-100 rounded-lg">
+                      <p className="text-gray-600 text-sm">Evening</p>
+                      <p className="text-xl font-bold text-gray-800">N/A</p>
+                      <p className="text-xs text-gray-600">6PM - 12AM</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Best Posting Time from Analytics Service */}
+              <div className="p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
+                <h4 className="text-sm font-medium text-green-800 mb-2">🎯 Recommended Posting Time</h4>
+                <p className="text-lg font-bold text-green-900">
+                  {comprehensiveAnalytics?.posting_times?.optimal_posting_analysis?.favoured_posting_time || 
+                   filteredInsights.optimal_posting_times?.favoured_posting_time || 'Morning (9:00 AM - 11:00 AM)'}
+                </p>
+                <p className="text-xs text-green-700 mt-1">
+                  Based on engagement patterns from your posts
+                </p>
+              </div>
+
+              {/* Best Days from Analytics Service */}
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-gray-700">Best Performing Days</h4>
+                <div className="grid grid-cols-7 gap-1">
+                  {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((fullDay, index) => {
+                    const shortDay = fullDay.slice(0, 3);
+                    const bestDays = comprehensiveAnalytics?.posting_times?.best_days || filteredInsights.optimal_posting_times?.best_days || [];
+                    const dayData = bestDays.find(d => d.day === fullDay);
+                    const isTopDay = dayData && bestDays.indexOf(dayData) < 3;
+                    
+                    return (
+                      <div key={shortDay} className={`text-center p-2 rounded ${isTopDay ? 'bg-green-100' : 'bg-gray-50'}`}>
+                        <p className="text-xs text-gray-600">{shortDay}</p>
+                        <p className={`text-sm font-bold ${isTopDay ? 'text-green-800' : 'text-gray-900'}`}>
+                          {dayData ? Math.round(dayData.avg_engagement) : 0}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500 text-center mt-2">
+                  Average engagement per day (green = top performing)
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <p className="text-lg">No time data available</p>
+                <p className="text-sm mt-2">Post more content to see time analysis</p>
               </div>
             </div>
           )}
         </div>
 
-        {/* Cumulative Hashtag Performance */}
+        {/* Advanced Performance Metrics */}
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
-            Top Hashtags - Total Engagement ({chartTimeRange} days)
+            📊 Advanced Performance Metrics
           </h3>
-          {cumulativeHashtagData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={400}>
-              <RechartsBarChart data={cumulativeHashtagData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="hashtag" 
-                  angle={-45}
-                  textAnchor="end"
-                  height={100}
-                  fontSize={12}
-                />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value, name) => [value, name]}
-                  labelFormatter={(label) => `${label} (used ${cumulativeHashtagData.find(h => h.hashtag === label)?.usageCount || 0} times)`}
-                />
-                <Legend />
-                <Bar dataKey="totalEngagement" fill="#FF6B35" name="Total Engagement" />
-              </RechartsBarChart>
-            </ResponsiveContainer>
+          {filteredInsights ? (
+            <div className="space-y-4">
+              {/* Key Performance Indicators */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-blue-600 text-sm">Engagement Rate</p>
+                  <p className="text-xl font-bold text-blue-800">
+                    {comprehensiveAnalytics?.performance?.engagement_rate 
+                      ? `${comprehensiveAnalytics.performance.engagement_rate}%`
+                      : filteredInsights.basic_stats?.engagement_per_content 
+                        ? `${((filteredInsights.basic_stats.engagement_per_content / (filteredInsights.basic_stats.total_content || 1)) * 100).toFixed(1)}%`
+                        : '0%'
+                    }
+                  </p>
+                </div>
+                <div className="p-3 bg-green-50 rounded-lg">
+                  <p className="text-green-600 text-sm">Content Quality</p>
+                  <p className="text-xl font-bold text-green-800">
+                    {comprehensiveAnalytics?.performance?.content_quality 
+                      ? `${comprehensiveAnalytics.performance.content_quality}/100`
+                      : filteredInsights.performance_insights?.performance_score 
+                        ? `${Math.round(filteredInsights.performance_insights.performance_score)}/100`
+                        : 'N/A'
+                    }
+                  </p>
+                </div>
+              </div>
+
+              {/* Content Performance Distribution */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-gray-700">Content Performance Distribution</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center p-2 bg-green-50 rounded">
+                    <span className="text-sm text-gray-700">High Performers (&gt;avg)</span>
+                    <span className="text-sm font-bold text-green-700">
+                      {filteredInsights.top_performers_count || 0} posts
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-2 bg-yellow-50 rounded">
+                    <span className="text-sm text-gray-700">Average Performers</span>
+                    <span className="text-sm font-bold text-yellow-700">
+                      {Math.max(0, (filteredInsights.basic_stats?.total_content || 0) - (filteredInsights.top_performers_count || 0) - Math.round((filteredInsights.basic_stats?.total_content || 0) * 0.2))} posts
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-2 bg-red-50 rounded">
+                    <span className="text-sm text-gray-700">Low Performers (&lt;50% avg)</span>
+                    <span className="text-sm font-bold text-red-700">
+                      {Math.round((filteredInsights.basic_stats?.total_content || 0) * 0.2)} posts
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Missing Data Notice */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <h4 className="text-xs font-medium text-amber-800 mb-1">📊 Data Sources</h4>
+                <div className="text-xs text-amber-700 space-y-1">
+                  <p>✅ Engagement: Likes, Comments (from Instagram Basic Display API)</p>
+                  <p>⚠️ Limited: Reach, Impressions (requires Instagram Business API)</p>
+                  <p>🔄 Time analysis: Estimated based on posting patterns</p>
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="h-64 flex items-center justify-center text-gray-500">
               <div className="text-center">
-                <p className="text-lg">No hashtag data available</p>
-                <p className="text-sm mt-2">Add captions with hashtags to your posts to see hashtag performance</p>
+                <p className="text-lg">No performance data available</p>
+                <p className="text-sm mt-2">Add more content to see advanced metrics</p>
               </div>
             </div>
           )}
