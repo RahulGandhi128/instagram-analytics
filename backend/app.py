@@ -57,6 +57,17 @@ def create_app():
             'status': 'running'
         }
     
+    @app.route('/health')
+    def health_check():
+        """Health check endpoint for Docker monitoring"""
+        from datetime import datetime
+        return {
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'service': 'instagram-analytics-backend',
+            'database': 'connected'
+        }, 200
+    
     # Create tables
     with app.app_context():
         try:
