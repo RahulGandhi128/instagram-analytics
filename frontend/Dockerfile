@@ -22,16 +22,20 @@ CMD ["npm", "start"]
 FROM base as build
 RUN npm run build
 
-# Production stage
+# Production stage with Nginx
 FROM nginx:alpine as production
 COPY --from=build /app/build /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 
-# Default stage for docker-compose
+# Default stage for docker-compose (updated)
 FROM node:18-alpine as default
 WORKDIR /app
+
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 COPY package*.json ./
 RUN npm ci --only=production
 COPY . .

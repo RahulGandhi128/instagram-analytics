@@ -9,9 +9,10 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - DATABASE_URL=sqlite:///instagram_analytics.db
       - OPENAI_API_KEY=${OPENAI_API_KEY:-your_openai_api_key_here}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
     volumes:
       - ./backend/instagram_analytics.db:/app/instagram_analytics.db
       - ./backend/uploads:/app/uploads
@@ -33,7 +34,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_API_URL=http://backend:5000
     depends_on:
       - backend
     networks:
@@ -46,27 +47,10 @@ services:
       retries: 3
       start_period: 40s
 
-  # Optional: Add PostgreSQL if you want to use it instead of SQLite
-  # postgres:
-  #   image: postgres:15-alpine
-  #   container_name: instagram-analytics-db
-  #   environment:
-  #     POSTGRES_DB: instagram_analytics
-  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
-  #   networks:
-  #     - instagram-analytics-network
-  #   restart: unless-stopped
-
 networks:
   instagram-analytics-network:
     driver: bridge
 
 volumes:
-  # postgres_data:  # Uncomment if using PostgreSQL
   uploads_data:
     driver: local
