@@ -1,56 +1,21 @@
-version: '3.8'
-
-services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: instagram-analytics-backend
-    ports:
-      - "5000:5000"
-    environment:
-      - FLASK_DEBUG=0
-      - DATABASE_URL=sqlite:///instagram_analytics.db
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-your_openai_api_key_here}
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
-    volumes:
-      - ./backend/instagram_analytics.db:/app/instagram_analytics.db
-      - ./backend/uploads:/app/uploads
-    networks:
-      - instagram-analytics-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: instagram-analytics-frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://backend:5000
-    depends_on:
-      - backend
-    networks:
-      - instagram-analytics-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-networks:
-  instagram-analytics-network:
-    driver: bridge
-
-volumes:
-  uploads_data:
-    driver: local
+frontend:
+  build:
+    context: ./frontend
+    dockerfile: Dockerfile
+    target: production  # Add this line
+  container_name: instagram-analytics-frontend
+  ports:
+    - "80:80"  # Change from 3000:3000 to 80:80
+  environment:
+    - REACT_APP_API_URL=http://backend:5000
+  depends_on:
+    - backend
+  networks:
+    - instagram-analytics-network
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
