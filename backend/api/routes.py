@@ -6,6 +6,7 @@ from services.instagram_service import InstagramAnalyticsService
 from services.chatbot_service import analytics_chatbot
 from services.analytics_service import AnalyticsService
 from services.calculation_methods_extractor import calculation_extractor
+from services.brainstormer_service import brainstormer_service
 from models.database import db, Profile, MediaPost, Story, DailyMetrics
 from sqlalchemy import func, desc
 import os
@@ -65,6 +66,50 @@ def proxy_image():
         )
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Failed to fetch image: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@api_bp.route('/download/image', methods=['GET'])
+def download_image():
+    """Download generated images (DALL-E) by proxying through server to avoid CORS"""
+    try:
+        image_url = request.args.get('url')
+        filename = request.args.get('filename', 'generated-image.png')
+        
+        if not image_url:
+            return jsonify({'error': 'URL parameter is required'}), 400
+        
+        # Validate that it's an OpenAI DALL-E URL for security
+        if not ('oaidalleapiprodscus.blob.core.windows.net' in image_url or 'openai.com' in image_url):
+            return jsonify({'error': 'Only OpenAI DALL-E URLs are allowed'}), 400
+        
+        # Fetch the image from OpenAI
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(image_url, headers=headers, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        # Return the image as download with appropriate headers
+        def generate():
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        
+        return Response(
+            generate(),
+            headers={
+                'Content-Type': response.headers.get('Content-Type', 'image/png'),
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Length': response.headers.get('Content-Length', ''),
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            }
+        )
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to download image: {str(e)}'}), 500
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
@@ -725,4 +770,44 @@ def get_analytics_context_for_content(username):
             'success': False,
             'error': str(e),
             'context': {}
+        }), 500
+
+
+@api_bp.route('/brainstormer/chat', methods=['POST'])
+def brainstormer_chat():
+    """Generate brainstorming response based on analytics data"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        message = data.get('message', '').strip()
+        session_id = data.get('session_id', '')
+        analytics_data = data.get('analytics_data', {})
+        username = data.get('username')
+        time_range = data.get('time_range', 30)
+        
+        if not message:
+            return jsonify({'error': 'Message is required'}), 400
+        
+        if not session_id:
+            return jsonify({'error': 'Session ID is required'}), 400
+        
+        # Generate brainstorm response
+        response_data = brainstormer_service.generate_brainstorm_response(
+            user_message=message,
+            session_id=session_id,
+            analytics_data=analytics_data,
+            username=username,
+            time_range=time_range
+        )
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'Failed to generate brainstorm response: {str(e)}',
+            'response': 'I apologize, but I encountered an error while processing your request. Please try again.',
+            'suggestions': []
         }), 500

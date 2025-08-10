@@ -12,14 +12,17 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  Users,
   User,
-  Sparkles,
   Settings,
   BarChart3,
   Eye,
-  X
+  X,
+  Sparkles,
+  Edit
 } from 'lucide-react';
 import { useUsernames } from '../hooks/useUsernames';
+import Brainstormer from './Brainstormer';
 
 const ContentCreator = ({ analyticsContext, showNotification }) => {
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
@@ -39,6 +42,15 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
   const [timeRange, setTimeRange] = useState(30);
   const [selectedUsername, setSelectedUsername] = useState('');
   const [downloadingImages, setDownloadingImages] = useState(new Set());
+  // Video-specific settings
+  const [videoIncludeAudio, setVideoIncludeAudio] = useState(false);
+  const [videoQuality, setVideoQuality] = useState('standard');
+  const [videoGenerateActual, setVideoGenerateActual] = useState(false); // New state for actual video
+  
+  // Image editing state
+  const [editingImage, setEditingImage] = useState(null); // URL of image being edited
+  const [isEditMode, setIsEditMode] = useState(false);
+  
   const messagesEndRef = useRef(null);
   
   // Get usernames for the dropdown
@@ -159,16 +171,22 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
     setCurrentInput('');
 
     try {
-      // Get fresh analytics context
-      const context = await getAnalyticsContext();
-      
+      // Send request without analytics context for pure content creation
       const requestData = {
         user_id: selectedUsername || 'anonymous',
         prompt: prompt,
         content_type: contentType,
-        analytics_context: context || analyticsContext,
+        analytics_context: null, // Always null for pure content creation
         style_preferences: stylePreferences,
-        session_id: sessionId
+        session_id: sessionId,
+        // Video-specific parameters
+        video_include_audio: contentType === 'video' ? videoIncludeAudio : false,
+        video_quality: contentType === 'video' ? videoQuality : 'standard',
+        video_generate_actual: contentType === 'video' ? videoGenerateActual : false,
+        // Image editing parameters
+        edit_previous_image: isEditMode && contentType === 'image',
+        previous_image_url: editingImage,
+        edit_instruction: isEditMode ? prompt : null
       };
 
       const response = await fetch('http://localhost:5000/api/content/create', {
@@ -192,10 +210,25 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
         contentData: result.content_data,
         metadata: result.metadata,
         error: result.error,
-        debugInfo: result.debug_info
+        debugInfo: result.debug_info,
+        // Video-specific data
+        videoData: result.content_type === 'video' ? {
+          concept: result.concept,
+          settings: result.settings,
+          video_url: result.video_url
+        } : null
       };
       
       setMessages(prev => [...prev, assistantMessage]);
+      
+      // Clear edit mode after successful submission
+      if (isEditMode) {
+        setIsEditMode(false);
+        setEditingImage(null);
+        if (showNotification) {
+          showNotification('Image edited successfully!', 'success');
+        }
+      }
       
     } catch (error) {
       console.error('Error creating content:', error);
@@ -227,40 +260,60 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
     });
   };
 
+  const downloadTextFile = (content, filename) => {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    if (showNotification) {
+      showNotification('File downloaded successfully!', 'success');
+    }
+  };
+
   const viewImageFullscreen = (url) => {
     // Open image in new tab without affecting current state
     window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const viewVideoFullscreen = (videoData) => {
+    if (videoData?.url) {
+      // Open video URL in new tab
+      window.open(videoData.url, '_blank', 'noopener,noreferrer');
+    } else {
+      // For concept videos, show an alert or modal
+      if (showNotification) {
+        showNotification('Video concept generated - actual video not available', 'info');
+      }
+    }
   };
 
   const downloadImage = async (url, filename, messageId) => {
     setDownloadingImages(prev => new Set([...prev, messageId]));
     
     try {
-      // Fetch the image as blob to download directly
-      const response = await fetch(url);
+      // Use backend proxy to download image and avoid CORS issues
+      const encodedUrl = encodeURIComponent(url);
+      const encodedFilename = encodeURIComponent(filename);
+      const proxyUrl = `http://localhost:5000/api/download/image?url=${encodedUrl}&filename=${encodedFilename}`;
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch image');
-      }
-      
-      const blob = await response.blob();
-      
-      // Create download link
-      const downloadUrl = window.URL.createObjectURL(blob);
+      // Create a temporary link to trigger download
       const link = document.createElement('a');
-      link.href = downloadUrl;
+      link.href = proxyUrl;
       link.download = filename;
+      link.target = '_blank'; // Open in new tab as fallback
       
       // Trigger download
       document.body.appendChild(link);
       link.click();
-      
-      // Cleanup
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
       
       if (showNotification) {
-        showNotification('Image downloaded successfully', 'success');
+        showNotification('Image download started successfully', 'success');
       }
     } catch (error) {
       console.error('Error downloading image:', error);
@@ -273,6 +326,68 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
         newSet.delete(messageId);
         return newSet;
       });
+    }
+  };
+
+  const editImage = (imageUrl) => {
+    setEditingImage(imageUrl);
+    setIsEditMode(true);
+    setContentType('image');
+    setCurrentInput('');
+    if (showNotification) {
+      showNotification('Edit mode enabled. Describe the changes you want to make.', 'info');
+    }
+  };
+
+  const cancelEditMode = () => {
+    setIsEditMode(false);
+    setEditingImage(null);
+    setCurrentInput('');
+    if (showNotification) {
+      showNotification('Edit mode cancelled', 'info');
+    }
+  };
+
+  const downloadVideo = async (videoData, messageId, messageContent) => {
+    if (videoData?.url) {
+      setDownloadingImages(prev => new Set([...prev, messageId])); // Reusing the same state for consistency
+      
+      try {
+        const response = await fetch(videoData.url);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch video');
+        }
+        
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `ai-generated-video-${Date.now()}.mp4`;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        if (showNotification) {
+          showNotification('Video downloaded successfully!', 'success');
+        }
+      } catch (error) {
+        console.error('Error downloading video:', error);
+        if (showNotification) {
+          showNotification('Failed to download video', 'error');
+        }
+      } finally {
+        setDownloadingImages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(messageId);
+          return newSet;
+        });
+      }
+    } else {
+      // For concept videos, download the concept as text
+      downloadTextFile(messageContent || 'Video concept', `video-concept-${Date.now()}.txt`);
     }
   };
 
@@ -324,6 +439,68 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
             ))}
           </div>
           
+          {/* Generated Video Concept */}
+          {message.contentType === 'video' && message.videoData && (
+            <div className="mb-3 p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Video className="w-4 h-4 text-purple-600" />
+                <span className="text-sm font-medium text-purple-800">Video Concept Generated</span>
+                {message.videoData.settings && (
+                  <div className="flex gap-1">
+                    {message.videoData.settings.audio_enabled && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Audio</span>
+                    )}
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                      {message.videoData.settings.quality || 'Standard'} Quality
+                    </span>
+                  </div>
+                )}
+              </div>
+              
+              {/* Video Preview/Placeholder */}
+              <div className="bg-gray-900 rounded-lg p-8 text-center mb-3 relative">
+                <Video className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                <p className="text-gray-300 text-sm">Video Concept Ready</p>
+                <p className="text-gray-400 text-xs">
+                  Model: {message.videoData.settings?.model || 'Google Veo 3 Fast'}
+                </p>
+                <div className="absolute top-2 right-2">
+                  <span className="text-xs bg-purple-600 text-white px-2 py-1 rounded">
+                    🎬 Veo 3 Fast
+                  </span>
+                </div>
+              </div>
+              
+              {/* Video Actions */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => viewVideoFullscreen(message.videoData)}
+                  className="flex-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2 rounded-lg flex items-center justify-center gap-1 transition-colors border border-blue-200"
+                >
+                  <Eye className="w-3 h-3" />
+                  View Fullscreen
+                </button>
+                <button
+                  onClick={() => downloadVideo(message.videoData, message.id, message.content)}
+                  disabled={downloadingImages.has(message.id)}
+                  className="flex-1 text-xs bg-purple-50 hover:bg-purple-100 disabled:bg-gray-100 text-purple-700 disabled:text-gray-500 px-3 py-2 rounded-lg flex items-center justify-center gap-1 transition-colors border border-purple-200 disabled:border-gray-300"
+                >
+                  {downloadingImages.has(message.id) ? (
+                    <>
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      Downloading...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3 h-3" />
+                      Download
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+          
           {/* Generated Image */}
           {message.contentUrl && message.contentType === 'image' && (
             <div className="mb-3">
@@ -348,6 +525,13 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
                 >
                   <Eye className="w-3 h-3" />
                   View Fullscreen
+                </button>
+                <button
+                  onClick={() => editImage(message.contentUrl)}
+                  className="flex-1 text-xs bg-green-50 hover:bg-green-100 text-green-700 px-3 py-2 rounded-lg flex items-center justify-center gap-1 transition-colors border border-green-200"
+                >
+                  <Edit className="w-3 h-3" />
+                  Edit Image
                 </button>
                 <button
                   onClick={() => downloadImage(message.contentUrl, `ai-generated-${Date.now()}.png`, message.id)}
@@ -485,7 +669,16 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
               <span className="text-sm font-medium text-blue-800">
                 📊 Context: {analyticsLoading ? 'Loading...' : (
                   analyticsData ? 
-                    `${analyticsData.analytics?.basic_stats?.total_content || 0} posts, ${(analyticsData.analytics?.basic_stats?.total_engagement || 0).toLocaleString()} total engagement` :
+                    (() => {
+                      const posts = analyticsData.analytics?.posts?.basic_stats?.total_content || 
+                                   analyticsData.analytics?.posts?.basic_stats?.total_posts ||
+                                   (analyticsData.analytics?.engagement_trends?.daily_metrics ? 
+                                     analyticsData.analytics.engagement_trends.daily_metrics.reduce((sum, day) => sum + (day.posts || 0), 0) : 0);
+                      const engagement = analyticsData.analytics?.posts?.basic_stats?.total_engagement ||
+                                        (analyticsData.analytics?.engagement_trends?.daily_metrics ? 
+                                          analyticsData.analytics.engagement_trends.daily_metrics.reduce((sum, day) => sum + (day.engagement || 0), 0) : 0);
+                      return `${posts} posts, ${engagement.toLocaleString()} total engagement`;
+                    })() :
                     selectedUsername ? 'No data available' : '0 posts, 0 total engagement'
                 )}
               </span>
@@ -537,15 +730,33 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                       <div>
                         <p className="text-green-600 font-medium">Total Content</p>
-                        <p className="text-green-800">{analyticsData.analytics?.basic_stats?.total_content || 0} posts</p>
+                        <p className="text-green-800">
+                          {analyticsData.analytics?.posts?.basic_stats?.total_content || 
+                           analyticsData.analytics?.posts?.basic_stats?.total_posts || 
+                           (analyticsData.analytics?.engagement_trends?.daily_metrics ? 
+                             analyticsData.analytics.engagement_trends.daily_metrics.reduce((sum, day) => sum + (day.posts || 0), 0) : 0)} posts
+                        </p>
                       </div>
                       <div>
                         <p className="text-green-600 font-medium">Total Engagement</p>
-                        <p className="text-green-800">{(analyticsData.analytics?.basic_stats?.total_engagement || 0).toLocaleString()}</p>
+                        <p className="text-green-800">
+                          {(analyticsData.analytics?.posts?.basic_stats?.total_engagement || 
+                            (analyticsData.analytics?.engagement_trends?.daily_metrics ? 
+                              analyticsData.analytics.engagement_trends.daily_metrics.reduce((sum, day) => sum + (day.engagement || 0), 0) : 0)).toLocaleString()}
+                        </p>
                       </div>
                       <div>
                         <p className="text-green-600 font-medium">Avg Engagement</p>
-                        <p className="text-green-800">{Math.round(analyticsData.analytics?.basic_stats?.avg_engagement_per_post || 0)}</p>
+                        <p className="text-green-800">
+                          {Math.round(analyticsData.analytics?.posts?.basic_stats?.avg_engagement_per_post || 
+                                     (analyticsData.analytics?.engagement_trends?.daily_metrics ? 
+                                       (() => {
+                                         const metrics = analyticsData.analytics.engagement_trends.daily_metrics;
+                                         const totalEngagement = metrics.reduce((sum, day) => sum + (day.engagement || 0), 0);
+                                         const totalPosts = metrics.reduce((sum, day) => sum + (day.posts || 0), 0);
+                                         return totalPosts > 0 ? totalEngagement / totalPosts : 0;
+                                       })() : 0))}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -584,6 +795,14 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
           </div>
         </div>
       )}
+
+      {/* Brainstormer Component */}
+      <Brainstormer 
+        analyticsData={analyticsData}
+        selectedUsername={selectedUsername}
+        timeRange={timeRange}
+        showNotification={showNotification}
+      />
 
       {/* AI Content Creator */}
       <div className="bg-white rounded-lg shadow-lg p-6">
@@ -669,6 +888,105 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
         </div>
       )}
 
+      {/* Video Settings */}
+      {contentType === 'video' && (
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+          <h4 className="text-sm font-medium text-gray-700 mb-3">Video Settings (Veo 3 Fast)</h4>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-2">Audio Settings</label>
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setVideoIncludeAudio(false)}
+                  className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                    !videoIncludeAudio 
+                      ? 'bg-purple-100 border-purple-300 text-purple-700' 
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  No Audio
+                </button>
+                <button
+                  onClick={() => setVideoIncludeAudio(true)}
+                  className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                    videoIncludeAudio 
+                      ? 'bg-purple-100 border-purple-300 text-purple-700' 
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  With Audio
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-2">Video Quality</label>
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setVideoQuality('standard')}
+                  className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                    videoQuality === 'standard' 
+                      ? 'bg-purple-100 border-purple-300 text-purple-700' 
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  Standard
+                </button>
+                <button
+                  onClick={() => setVideoQuality('high')}
+                  className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                    videoQuality === 'high' 
+                      ? 'bg-purple-100 border-purple-300 text-purple-700' 
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  High Quality
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          {/* New: Actual Video Generation Toggle */}
+          <div className="mt-4">
+            <label className="block text-xs font-medium text-gray-600 mb-2">
+              Generation Type 
+              <span className="text-red-500 ml-1" title="Actual video generation is experimental and may be expensive">⚠️</span>
+            </label>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setVideoGenerateActual(false)}
+                className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                  !videoGenerateActual 
+                    ? 'bg-green-100 border-green-300 text-green-700' 
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                💡 Concept Only (Free)
+              </button>
+              <button
+                onClick={() => setVideoGenerateActual(true)}
+                className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                  videoGenerateActual 
+                    ? 'bg-red-100 border-red-300 text-red-700' 
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                🎬 Actual Video (Experimental)
+              </button>
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              {videoGenerateActual 
+                ? "⚠️ Experimental: Attempts to generate actual video (may be expensive/unavailable)" 
+                : "💰 Cost-effective: Generates detailed video concept and script"
+              }
+            </div>
+          </div>
+          
+          <div className="mt-2 text-xs text-gray-600">
+            📹 Using Google Veo 3 Fast model for video generation
+          </div>
+        </div>
+      )}
+
       {/* Analytics Context Info */}
       {selectedUsername && (
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -683,7 +1001,7 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
       )}
 
       {/* Chat Messages */}
-      <div className="mb-4 h-96 overflow-y-auto border border-gray-200 rounded-lg p-4">
+      <div className="mb-4 h-[600px] overflow-y-auto border border-gray-200 rounded-lg p-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <Bot className="w-12 h-12 mb-2 opacity-50" />
@@ -713,6 +1031,36 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Edit Mode Indicator */}
+      {isEditMode && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Edit className="w-4 h-4 text-green-600" />
+              <span className="text-sm font-medium text-green-800">Edit Mode Active</span>
+            </div>
+            <button
+              onClick={cancelEditMode}
+              className="text-green-600 hover:text-green-800 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-green-700 mt-1">
+            Describe the changes you want to make to the previous image.
+          </p>
+          {editingImage && (
+            <div className="mt-2">
+              <img 
+                src={editingImage} 
+                alt="Image being edited" 
+                className="w-16 h-16 rounded-lg border border-green-300 object-cover"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="flex gap-2">
         <input
@@ -720,7 +1068,11 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
           value={currentInput}
           onChange={(e) => setCurrentInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && !isLoading && createContent()}
-          placeholder={`Ask me to create ${contentType} content...`}
+          placeholder={
+            isEditMode 
+              ? "Describe the changes you want to make..." 
+              : `Ask me to create ${contentType} content...`
+          }
           className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
           disabled={isLoading}
         />
@@ -734,7 +1086,7 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
           ) : (
             <Send className="w-4 h-4" />
           )}
-          Create
+          {isEditMode ? 'Edit' : 'Create'}
         </button>
       </div>
 

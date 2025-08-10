@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Star, MapPin, Clock } from 'lucide-react';
-import ContentCreator from '../components/ContentCreator';
 
 const Calendar = ({ showNotification }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -465,23 +464,6 @@ const Calendar = ({ showNotification }) => {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Content Creator Section */}
-      <div className="mt-8">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">🎨 AI Content Creator</h2>
-          <p className="text-gray-600 mb-4">
-            Create engaging content for your calendar events and special occasions with AI assistance.
-            Get personalized suggestions based on your analytics data and performance insights.
-          </p>
-        </div>
-
-        {/* Content Creator Component */}
-        <ContentCreator 
-          analyticsContext={null} // Will be fetched by the component based on selectedUsername
-          showNotification={showNotification}
-        />
       </div>
     </div>
   );
