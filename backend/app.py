@@ -4,7 +4,7 @@ Instagram Analytics Flask Application
 from flask import Flask
 from flask_cors import CORS
 from models.database import db
-from api.routes import api_bp
+from api.routes import register_blueprints
 import os
 from dotenv import load_dotenv
 try:
@@ -46,7 +46,7 @@ def create_app():
     db.init_app(app)
     
     # Register blueprints
-    app.register_blueprint(api_bp, url_prefix='/api')
+    register_blueprints(app)
     
     # Health check route
     @app.route('/')

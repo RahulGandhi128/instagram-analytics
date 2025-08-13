@@ -1,0 +1,50 @@
+📘 Application Requirement Document: Metrics Mentra
+🔷 1. OVERVIEW DASHBOARD
+Fields Required:
+Total Reach 
+Total Impressions 
+Impression / Content
+Favoured Time Of Posting-Morning
+Favoured Mode Of Posting- Reels
+Count Of Collab Content
+Total Content (post+carousel+reels)
+Total Likes (post+carousel+reels)
+Total Comments (post+carousel+reels)
+Total Engagement (like+comment+save+shares)
+Engagement Per Content(Total Engagement/Total Content)
+Average Reel View(Total reel plays/Total Reel Count)
+Top Performers(Count of content where engagement > engagement per content)
+
+Core Feature:
+Display an overview of account metrics over a selected date range.
+
+
+Automatically parse and visualize key insights.
+
+🔷 2. TRENDING HASHTAG ANALYSIS
+Inputs:
+Date Range
+
+
+
+Output:
+Trending Hashtags with:
+
+Total Posts
+
+Total Engagement (likes, comments, views)
+
+e.g.:
+
+#fyp – 128 posts | 200k engagement
+
+#like4like – 128 posts | 200k engagement
+
+Use Case:
+Let users understand which hashtags are performing best over time.
+
+total engagement = likes + comments + repost + share
+for metrics visualisation guideline would be- 
+if they. are time series - line charts. 
+if they. are aggregated - table
+if they. are to show distribution then bar/pie chart

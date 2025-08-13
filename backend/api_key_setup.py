@@ -1,0 +1,33 @@
+"""
+API Key Setup Guide
+Instructions for configuring the Star API key
+"""
+
+print("🔑 Star API Key Setup Guide")
+print("=" * 40)
+print()
+print("The Star API tests are failing because the API key is not configured.")
+print()
+print("To fix this, you need to:")
+print()
+print("1. Get your Star API key from RapidAPI:")
+print("   - Go to https://rapidapi.com/star-api/")
+print("   - Subscribe to the Star API")
+print("   - Copy your API key")
+print()
+print("2. Create a .env file in the backend folder:")
+print("   - Create: c:\\Users\\parth\\mentra project\\backend\\.env")
+print("   - Add this line: API_KEY=your_actual_api_key_here")
+print()
+print("3. Restart the backend server:")
+print("   - Stop current server (Ctrl+C)")
+print("   - Run: python app.py")
+print()
+print("Example .env file content:")
+print("API_KEY=12345abcdef67890your-rapidapi-key-here")
+print()
+print("Once configured, all Star API endpoints should work correctly!")
+print()
+print("💡 Alternative: Set environment variable directly:")
+print("   $env:API_KEY='your-api-key-here'")
+print("   python app.py")

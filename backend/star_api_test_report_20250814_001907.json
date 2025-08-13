@@ -1,0 +1,109 @@
+{
+  "timestamp": "2025-08-14T00:18:09.034792",
+  "base_url": "http://localhost:5000/api",
+  "test_username": "instagram",
+  "endpoint_tests": {
+    "database_status": {
+      "status": "PASS",
+      "success": true,
+      "details": "Profiles: 5, Media: 48, Stories: 2",
+      "error": null,
+      "timestamp": "2025-08-14T00:18:11.128163"
+    },
+    "existing_fetch_data": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "Request timeout",
+      "timestamp": "2025-08-14T00:18:44.176978"
+    },
+    "existing_analytics": {
+      "status": "PASS",
+      "success": true,
+      "details": "Analytics data available",
+      "error": null,
+      "timestamp": "2025-08-14T00:18:46.268788"
+    },
+    "user_info_endpoint": {
+      "status": "PASS",
+      "success": true,
+      "details": "Response size: 3876 chars",
+      "error": null,
+      "timestamp": "2025-08-14T00:18:51.040442"
+    },
+    "user_media_endpoint": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "Request error: 500 Server Error: INTERNAL SERVER ERROR for url: http://localhost:5000/api/star-api/user-media/instagram?count=10",
+      "timestamp": "2025-08-14T00:18:53.101714"
+    },
+    "user_stories_endpoint": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "Request error: 500 Server Error: INTERNAL SERVER ERROR for url: http://localhost:5000/api/star-api/user-stories/instagram",
+      "timestamp": "2025-08-14T00:18:55.149875"
+    },
+    "star_api_user_clips": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "invalid literal for int() with base 10: 'instagram'",
+      "timestamp": "2025-08-14T00:19:01.310475"
+    },
+    "star_api_user_highlights": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "invalid literal for int() with base 10: 'instagram'",
+      "timestamp": "2025-08-14T00:19:01.312851"
+    },
+    "star_api_user_info_by_username": {
+      "status": "PASS",
+      "success": true,
+      "details": "Data size: 3876 bytes",
+      "error": null,
+      "timestamp": "2025-08-14T00:19:01.313612"
+    },
+    "star_api_user_media": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "invalid literal for int() with base 10: 'instagram'",
+      "timestamp": "2025-08-14T00:19:01.315487"
+    },
+    "star_api_user_stories": {
+      "status": "FAIL",
+      "success": false,
+      "details": null,
+      "error": "invalid literal for int() with base 10: 'instagram'",
+      "timestamp": "2025-08-14T00:19:01.315951"
+    },
+    "comprehensive_collection": {
+      "status": "FAIL",
+      "success": false,
+      "details": "Data collected: ['profile'], Errors: 1",
+      "error": "invalid literal for int() with base 10: 'instagram'",
+      "timestamp": "2025-08-14T00:19:07.005167"
+    }
+  },
+  "database_tests": {
+    "status": {
+      "daily_metrics": 4,
+      "last_updated": {
+        "media_posts": "2025-08-14T00:05:53.335859",
+        "profiles": "2025-08-14T00:06:20.012329",
+        "stories": "2025-08-14T00:05:34.097670"
+      },
+      "media_posts": 48,
+      "profiles": 5,
+      "stories": 2
+    }
+  },
+  "summary": {
+    "total_tests": 12,
+    "passed": 4,
+    "failed": 8
+  }
+}

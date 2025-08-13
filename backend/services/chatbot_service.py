@@ -3,7 +3,7 @@ ChatBot Service for Instagram Analytics Insights
 Uses OpenAI GPT for intelligent data analysis and insights
 Now uses centralized AnalyticsService to eliminate redundancy
 """
-import openai
+from openai import OpenAI
 import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -13,8 +13,21 @@ import os
 
 class AnalyticsChatBot:
     def __init__(self):
-        # Initialize OpenAI
-        openai.api_key = os.getenv('OPENAI_API_KEY')
+        # Initialize OpenAI client (handle missing API key gracefully)
+        api_key = os.getenv('OPENAI_API_KEY')
+        if api_key:
+            try:
+                self.openai_client = OpenAI(api_key=api_key)
+                self.has_openai = True
+            except Exception as e:
+                print(f"⚠️ ChatBot: Failed to initialize OpenAI client: {e}")
+                self.openai_client = None
+                self.has_openai = False
+        else:
+            print("⚠️ ChatBot: No OpenAI API key found - chatbot will be limited")
+            self.openai_client = None
+            self.has_openai = False
+            
         self.model = "gpt-3.5-turbo"  # You can change to gpt-4 for better results
         
         # Initialize centralized analytics service
@@ -126,6 +139,14 @@ Remember: This data covers the last {period_days} days for {username_filter}. Al
         Process user message and return AI response with analytics context
         """
         try:
+            # Check if OpenAI is available
+            if not self.has_openai or not self.openai_client:
+                return {
+                    'success': False,
+                    'error': 'OpenAI API not available',
+                    'response': "I apologize, but the AI chatbot service is currently unavailable. Please ensure the OpenAI API key is properly configured."
+                }
+            
             # Get analytics context using centralized service
             analytics_context = self.get_analytics_context(username, days)
             
@@ -155,7 +176,7 @@ Remember: This data covers the last {period_days} days for {username_filter}. Al
             messages.append({"role": "user", "content": message})
             
             # Call OpenAI API
-            response = openai.ChatCompletion.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 max_tokens=1500,
@@ -204,7 +225,7 @@ Remember: This data covers the last {period_days} days for {username_filter}. Al
                 'analytics_context': analytics_context,  # Full context for frontend display
                 'conversation_length': len(self.conversation_memory[session_id]),
                 'model_used': self.model,
-                'tokens_used': response.usage.total_tokens if hasattr(response, 'usage') else 0
+                'tokens_used': response.usage.total_tokens if response.usage else 0
             }
             
         except Exception as e:
