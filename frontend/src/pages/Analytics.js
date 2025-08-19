@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, BarChart, Calendar, Users } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart as RechartsBarChart, Bar, PieChart, Pie, Cell } from 'recharts';
 import { analyticsAPI } from '../services/api';
+import { starApiService } from '../services/starApiService';
 import { useUsernames } from '../hooks/useUsernames';
+import StarApiDataManager from '../components/StarApiDataManager';
 
 const Analytics = ({ showNotification }) => {
   const [insights, setInsights] = useState({});
@@ -33,21 +35,67 @@ const Analytics = ({ showNotification }) => {
         comparisonParams.end_date = customEndDate;
       }
 
-      const [insightsRes, weeklyRes] = await Promise.all([
-        analyticsAPI.getInsights(params),
-        analyticsAPI.getWeeklyComparison(comparisonParams)
-      ]);
+      // Only fetch data if we have a username selected
+      if (!selectedUsername) {
+        setInsights({});
+        setWeeklyComparison({});
+        setLoading(false);
+        return;
+      }
 
-      setInsights(insightsRes.data.data);
-      setWeeklyComparison(weeklyRes.data.data);
+      // Try to get enhanced Star API analytics first
+      let enhancedAnalytics = null;
+      try {
+        enhancedAnalytics = await starApiService.getEnhancedAnalytics(selectedUsername, timeRange);
+      } catch (error) {
+        console.warn('Enhanced analytics not available, falling back to regular analytics:', error);
+      }
+
+      if (enhancedAnalytics) {
+        // Use enhanced insights from Star API
+        setInsights(enhancedAnalytics.insights || {});
+        
+        // Get enhanced weekly comparison
+        try {
+          const enhancedComparison = await starApiService.getPerformanceComparison(selectedUsername, comparisonPeriod);
+          setWeeklyComparison(enhancedComparison || {});
+        } catch (error) {
+          console.warn('Enhanced comparison not available, using fallback');
+          // Fallback to regular comparison
+          const weeklyRes = await analyticsAPI.getWeeklyComparison(comparisonParams);
+          if (weeklyRes.success && weeklyRes.data) {
+            setWeeklyComparison(weeklyRes.data.data);
+          } else {
+            setWeeklyComparison({});
+          }
+        }
+      } else {
+        // Fallback to regular analytics
+        const [insightsRes, weeklyRes] = await Promise.all([
+          analyticsAPI.getInsights(params),
+          analyticsAPI.getWeeklyComparison(comparisonParams)
+        ]);
+
+        // Handle response data safely
+        if (insightsRes.success && insightsRes.data) {
+          setInsights(insightsRes.data.data);
+        } else {
+          setInsights({});
+        }
+        
+        if (weeklyRes.success && weeklyRes.data) {
+          setWeeklyComparison(weeklyRes.data.data);
+        } else {
+          setWeeklyComparison({});
+        }
+      }
       
       // Debug logging
       console.log('Analytics Data Updated:', {
         selectedUsername,
         timeRange,
         comparisonPeriod,
-        customDates: comparisonPeriod === 'custom' ? { start: customStartDate, end: customEndDate } : null,
-        weeklyComparisonData: weeklyRes.data.data
+        customDates: comparisonPeriod === 'custom' ? { start: customStartDate, end: customEndDate } : null
       });
     } catch (error) {
       showNotification('Error loading analytics data', 'error');

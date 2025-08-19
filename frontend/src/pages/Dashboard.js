@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Users, MessageCircle, Heart, TrendingUp, BarChart, Download, Info } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart as RechartsBarChart, Bar, ComposedChart, PieChart, Pie, Cell } from 'recharts';
 import { analyticsAPI } from '../services/api';
+import { starApiService } from '../services/starApiService';
 import { useUsernames } from '../hooks/useUsernames';
 import { useNavigate } from 'react-router-dom';
+import StarApiDataManager from '../components/StarApiDataManager';
 
 const Dashboard = ({ showNotification }) => {
   const navigate = useNavigate();
@@ -28,49 +30,90 @@ const Dashboard = ({ showNotification }) => {
       const params = { days: chartTimeRange };
       if (selectedUsername) params.username = selectedUsername;
 
+      // Fetch enhanced Star API analytics if username is selected
+      let enhancedAnalytics = null;
+      if (selectedUsername) {
+        try {
+          enhancedAnalytics = await starApiService.getEnhancedAnalytics(selectedUsername, chartTimeRange);
+        } catch (error) {
+          console.warn('Enhanced analytics not available, falling back to regular analytics:', error);
+        }
+      }
+
       // Use centralized analytics service for all data
       const [summaryRes, mediaRes, insightsRes, dailyChartRes, comprehensiveRes] = await Promise.all([
         analyticsAPI.getSummaryStats(params),
-        analyticsAPI.getMedia(params),
-        analyticsAPI.getInsights(params),
-        // New: Get daily chart data from analytics service
-        fetch(`http://localhost:5000/api/analytics/daily-chart?${new URLSearchParams(params)}`).then(r => r.json()),
-        // New: Get comprehensive analytics data
-        fetch(`http://localhost:5000/api/analytics/comprehensive?${new URLSearchParams(params)}`).then(r => r.json())
+        // Only fetch media data if we have a username
+        selectedUsername ? analyticsAPI.getMedia(params) : Promise.resolve({ success: false, data: [] }),
+        // Only fetch analytics endpoints if we have a username
+        selectedUsername ? analyticsAPI.getInsights(params) : Promise.resolve({ success: false, data: null }),
+        // Use analytics service for daily chart data
+        selectedUsername ? 
+          fetch(`http://localhost:5000/api/analytics/daily-chart?${new URLSearchParams(params)}`).then(r => r.json()) :
+          Promise.resolve({ success: false, data: [] }),
+        // Get comprehensive analytics data only if username is selected
+        selectedUsername ?
+          fetch(`http://localhost:5000/api/analytics/comprehensive?${new URLSearchParams(params)}`).then(r => r.json()) :
+          Promise.resolve({ success: false, data: null })
       ]);
 
-      setSummaryStats(summaryRes.data.data);
-      
-      // Store media posts data for compatibility (minimal usage now)
-      const mediaData = mediaRes.data.data || [];
-      setMediaPostsData(mediaData);
-      
-      // Use analytics service data instead of local calculations
-      if (dailyChartRes.success) {
-        setDailyMetrics(dailyChartRes.data);
-      }
-      
-      // Extract hashtag data from comprehensive analytics
-      if (comprehensiveRes.success && comprehensiveRes.data.hashtags) {
-        const hashtagAnalytics = comprehensiveRes.data.hashtags;
-        // Use trending_hashtags which has proper structure for charts
-        const trendingData = hashtagAnalytics.trending_hashtags || [];
-        setHashtagData(trendingData.map(tag => ({
-          hashtag: tag.hashtag.replace('#', ''),
-          posts: tag.total_posts,
-          totalEngagement: tag.total_engagement,
-          avgEngagement: Math.round(tag.avg_engagement),
-          engagement_display: tag.engagement_display
-        })));
-        setCumulativeHashtagData(hashtagAnalytics.top_hashtags || []);
+      // Use enhanced analytics data if available
+      if (enhancedAnalytics) {
+        setSummaryStats(enhancedAnalytics.summary);
+        setDailyMetrics(enhancedAnalytics.dailyMetrics);
+        setHashtagData(enhancedAnalytics.hashtags.trending);
+        setCumulativeHashtagData(enhancedAnalytics.hashtags.top);
+        
+        // Enhanced media data with Star API metrics
+        const enhancedMedia = enhancedAnalytics.media || [];
+        setMediaPostsData(enhancedMedia);
+      } else {
+        // Fallback to regular analytics
+        setSummaryStats(summaryRes.data.data);
+        
+        // Store media posts data for compatibility (minimal usage now)
+        const mediaData = (mediaRes.success && mediaRes.data) ? mediaRes.data.data || [] : [];
+        setMediaPostsData(mediaData);
+        
+        // Use analytics service data instead of local calculations
+        if (dailyChartRes.success && dailyChartRes.data) {
+          setDailyMetrics(dailyChartRes.data);
+        } else {
+          setDailyMetrics([]); // Reset when no username selected
+        }
+        
+        // Extract hashtag data from comprehensive analytics
+        if (comprehensiveRes.success && comprehensiveRes.data && comprehensiveRes.data.hashtags) {
+          const hashtagAnalytics = comprehensiveRes.data.hashtags;
+          // Use trending_hashtags which has proper structure for charts
+          const trendingData = hashtagAnalytics.trending_hashtags || [];
+          setHashtagData(trendingData.map(tag => ({
+            hashtag: tag.hashtag.replace('#', ''),
+            posts: tag.total_posts,
+            totalEngagement: tag.total_engagement,
+            avgEngagement: Math.round(tag.avg_engagement),
+            engagement_display: tag.engagement_display
+          })));
+          setCumulativeHashtagData(hashtagAnalytics.top_hashtags || []);
+        } else {
+          setHashtagData([]);
+          setCumulativeHashtagData([]);
+        }
       }
       
       // Store comprehensive analytics for performance metrics
-      if (comprehensiveRes.success) {
+      if (comprehensiveRes.success && comprehensiveRes.data) {
         setComprehensiveAnalytics(comprehensiveRes.data);
+      } else {
+        setComprehensiveAnalytics(null);
       }
       
-      setInsights(insightsRes.data.data);
+      // Handle insights data safely
+      if (insightsRes.success && insightsRes.data) {
+        setInsights(insightsRes.data.data);
+      } else {
+        setInsights({});
+      }
       
       // Debug logging for analytics service data
       console.log('Dashboard Data Updated (Centralized):', {
@@ -105,6 +148,10 @@ const Dashboard = ({ showNotification }) => {
   useEffect(() => {
     fetchDashboardData();
   }, [selectedUsername, chartTimeRange, fetchDashboardData]);
+
+  const refreshData = useCallback(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const fetchInstagramData = async () => {
     setFetchingData(true);
@@ -339,6 +386,9 @@ const Dashboard = ({ showNotification }) => {
           </div>
         </div>
       </div>
+
+      {/* Star API Data Manager */}
+      <StarApiDataManager username={selectedUsername} onDataUpdate={refreshData} />
 
       {/* Header */}
       <div className="md:flex md:items-center md:justify-between mb-6">

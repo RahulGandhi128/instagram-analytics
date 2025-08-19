@@ -21,13 +21,15 @@ def get_insights():
     """
     try:
         username = request.args.get('username')
+        days = request.args.get('days', 30, type=int)
+        
         if not username:
             return jsonify({
                 'success': False,
                 'error': 'Username parameter is required'
             }), 400
 
-        insights = analytics_service.get_insights(username)
+        insights = analytics_service.get_performance_insights(username, days)
         return jsonify({
             'success': True,
             'data': insights
@@ -73,13 +75,15 @@ def get_comprehensive_analytics():
     """
     try:
         username = request.args.get('username')
+        days = request.args.get('days', 30, type=int)
+        
         if not username:
             return jsonify({
                 'success': False,
                 'error': 'Username parameter is required'
             }), 400
 
-        analytics = analytics_service.get_comprehensive_analytics(username)
+        analytics = analytics_service.get_comprehensive_analytics(username, days)
         return jsonify({
             'success': True,
             'data': analytics
@@ -98,6 +102,8 @@ def get_weekly_comparison():
     """
     try:
         username = request.args.get('username')
+        days = request.args.get('days', 30, type=int)
+        
         if not username:
             return jsonify({
                 'success': False,
@@ -172,30 +178,10 @@ def export_csv():
     Export analytics data as CSV
     """
     try:
-        username = request.args.get('username')
-        data_type = request.args.get('type', 'media')  # media, stories, analytics
-        
-        if not username:
-            return jsonify({
-                'success': False,
-                'error': 'Username parameter is required'
-            }), 400
-
-        # Get profile
-        profile = Profile.query.filter_by(username=username).first()
-        if not profile:
-            return jsonify({
-                'success': False,
-                'error': 'Profile not found'
-            }), 404
-
-        csv_data = analytics_service.export_to_csv(profile.id, data_type)
-        
-        return Response(
-            csv_data,
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename={username}_{data_type}.csv'}
-        )
+        return jsonify({
+            'success': False,
+            'error': 'CSV export feature is temporarily unavailable'
+        }), 501
 
     except Exception as e:
         return jsonify({
@@ -408,20 +394,10 @@ def get_daily_trends():
     Get daily trends analysis
     """
     try:
-        username = request.args.get('username')
-        days = request.args.get('days', 30, type=int)
-        
-        if not username:
-            return jsonify({
-                'success': False,
-                'error': 'Username parameter is required'
-            }), 400
-
-        trends = analytics_service.get_daily_trends(username, days)
         return jsonify({
-            'success': True,
-            'data': trends
-        })
+            'success': False,
+            'error': 'Daily trends feature is temporarily unavailable'
+        }), 501
 
     except Exception as e:
         return jsonify({
@@ -435,19 +411,10 @@ def get_calculation_methods():
     Get detailed calculation methods for analytics
     """
     try:
-        username = request.args.get('username')
-        
-        if not username:
-            return jsonify({
-                'success': False,
-                'error': 'Username parameter is required'
-            }), 400
-
-        methods = calculation_extractor.extract_calculation_methods(username)
         return jsonify({
-            'success': True,
-            'data': methods
-        })
+            'success': False,
+            'error': 'Calculation methods feature is temporarily unavailable'
+        }), 501
 
     except Exception as e:
         return jsonify({

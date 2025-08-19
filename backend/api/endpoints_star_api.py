@@ -9,6 +9,64 @@ import os
 
 star_api_bp = Blueprint('star_api', __name__)
 
+@star_api_bp.route('/star-api/collect-user-data/<username>', methods=['POST'])
+def collect_user_data(username):
+    """
+    Alias for collect_comprehensive_data - collects comprehensive data for a user
+    """
+    return collect_comprehensive_data(username)
+
+@star_api_bp.route('/star-api/collection-status/<username>', methods=['GET'])
+def get_collection_status(username):
+    """
+    Get data collection status for a user
+    """
+    try:
+        # Check if profile exists and when it was last updated
+        profile = Profile.query.filter_by(username=username).first()
+        
+        if not profile:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'status': 'not_collected',
+                    'last_updated': None,
+                    'profile_exists': False
+                }
+            })
+        
+        # Count collected data
+        media_count = MediaPost.query.filter_by(username=username).count()
+        stories_count = Story.query.filter_by(username=username).count()
+        highlights_count = Highlight.query.filter_by(username=username).count()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'status': 'collected' if media_count > 0 else 'profile_only',
+                'last_updated': profile.last_updated.isoformat() if profile.last_updated else None,
+                'profile_exists': True,
+                'data_counts': {
+                    'media_posts': media_count,
+                    'stories': stories_count,
+                    'highlights': highlights_count
+                },
+                'profile_info': {
+                    'follower_count': profile.follower_count,
+                    'following_count': profile.following_count,
+                    'media_count': profile.media_count,
+                    'is_verified': profile.is_verified,
+                    'is_private': profile.is_private
+                }
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @star_api_bp.route('/star-api/collect-comprehensive/<username>', methods=['POST'])
 def collect_comprehensive_data(username):
     """

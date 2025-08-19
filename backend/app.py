@@ -14,7 +14,8 @@ except ImportError:
     SCHEDULER_AVAILABLE = False
     print("APScheduler not available - install with: pip install APScheduler")
 
-from services.instagram_service import InstagramAnalyticsService
+# Disabled for clean setup - causes import issues
+# from services.star_api_data_service import create_star_api_data_service
 
 # Load environment variables
 load_dotenv()
@@ -25,10 +26,10 @@ def create_app():
     # Configuration
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
     
-    # Database configuration - PostgreSQL with SQLite fallback
-    if os.getenv('USE_SQLITE', 'False').lower() == 'true' or not os.getenv('DATABASE_URL'):
+    # Database configuration - Use clean SQLite database
+    if os.getenv('USE_SQLITE', 'True').lower() == 'true' or not os.getenv('DATABASE_URL'):
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///instagram_analytics.db'
-        print("Using SQLite database")
+        print("Using clean SQLite database")
     else:
         app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
         print("Using PostgreSQL database")
@@ -87,7 +88,7 @@ def setup_scheduler(app):
     scheduler = BackgroundScheduler()
     
     def scheduled_data_fetch():
-        """Scheduled function to fetch Instagram data"""
+        """Scheduled function to fetch Instagram data using Star API"""
         with app.app_context():
             try:
                 api_key = os.getenv('API_KEY')
@@ -95,8 +96,25 @@ def setup_scheduler(app):
                     print("API_KEY not found in environment variables")
                     return
                 
-                service = InstagramAnalyticsService(api_key)
-                service.fetch_all_data()
+                # Star API disabled for clean setup
+                # data_service = create_star_api_data_service(api_key)
+                print("Star API data service disabled in clean setup")
+                
+                # Get all profiles and collect data for each
+                from models.database import Profile
+                profiles = Profile.query.all()
+                
+                for profile in profiles:
+                    try:
+                        print(f"Collecting data for {profile.username}")
+                        result = data_service.collect_comprehensive_data(profile.username)
+                        if result['status'] == 'success':
+                            print(f"✅ Data collected for {profile.username}")
+                        else:
+                            print(f"❌ Failed to collect data for {profile.username}: {result.get('errors', [])}")
+                    except Exception as e:
+                        print(f"Error collecting data for {profile.username}: {e}")
+                
                 print("Scheduled data fetch completed")
             except Exception as e:
                 print(f"Error in scheduled data fetch: {e}")
