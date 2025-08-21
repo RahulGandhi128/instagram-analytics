@@ -4,7 +4,7 @@ Analytics Endpoints - All analytics, insights, dashboard, and export functionali
 from flask import Blueprint, request, jsonify, Response
 from services.analytics_service import AnalyticsService
 from services.calculation_methods_extractor import calculation_extractor
-from models.database import db, Profile, MediaPost, Story, DailyMetrics
+from models.database import db, Profile, MediaPost, Story
 from sqlalchemy import func, desc
 from datetime import datetime, timedelta
 import os
@@ -149,11 +149,22 @@ def get_daily_metrics():
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=days)
         
-        metrics = DailyMetrics.query.filter_by(profile_id=profile.id)\
-                                  .filter(DailyMetrics.date >= start_date)\
-                                  .filter(DailyMetrics.date <= end_date)\
-                                  .order_by(DailyMetrics.date)\
-                                  .all()
+        # Get media posts for the date range instead of DailyMetrics
+        media_posts = MediaPost.query.filter_by(profile_id=profile.id)\
+                                   .filter(MediaPost.post_datetime_ist >= start_date)\
+                                   .filter(MediaPost.post_datetime_ist <= end_date)\
+                                   .order_by(MediaPost.post_datetime_ist)\
+                                   .all()
+        
+        # Convert media posts to metrics format
+        metrics = []
+        for post in media_posts:
+            metrics.append({
+                'date': post.post_datetime_ist.date(),
+                'likes': post.like_count or 0,
+                'comments': post.comment_count or 0,
+                'engagement': (post.like_count or 0) + (post.comment_count or 0)
+            })
 
         return jsonify({
             'success': True,
@@ -411,10 +422,38 @@ def get_calculation_methods():
     Get detailed calculation methods for analytics
     """
     try:
+        methods = {
+            "engagement_rate": {
+                "description": "Percentage of followers who engage with content",
+                "formula": "(Likes + Comments) / Followers * 100",
+                "interpretation": "Higher percentages indicate better audience engagement"
+            },
+            "avg_engagement": {
+                "description": "Average engagement per post",
+                "formula": "Total Engagement / Number of Posts",
+                "interpretation": "Shows consistency of engagement across content"
+            },
+            "growth_rate": {
+                "description": "Follower growth over time period",
+                "formula": "(Current Followers - Previous Followers) / Previous Followers * 100",
+                "interpretation": "Positive values indicate follower growth"
+            },
+            "best_posting_time": {
+                "description": "Optimal time to post based on engagement patterns",
+                "formula": "Time slots with highest average engagement",
+                "interpretation": "Times when audience is most active"
+            },
+            "content_performance": {
+                "description": "How different content types perform",
+                "formula": "Average engagement per content type",
+                "interpretation": "Identifies which content resonates most with audience"
+            }
+        }
+        
         return jsonify({
-            'success': False,
-            'error': 'Calculation methods feature is temporarily unavailable'
-        }), 501
+            'success': True,
+            'data': methods
+        })
 
     except Exception as e:
         return jsonify({

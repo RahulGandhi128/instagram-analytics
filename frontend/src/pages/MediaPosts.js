@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share, Play, ExternalLink, Calendar, Bookmark, Eye, MoreHorizontal, MapPin, Users } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Heart, MessageCircle, Share, ExternalLink, Calendar, Bookmark, Eye, MapPin, Users } from 'lucide-react';
 import { analyticsAPI } from '../services/api';
 import { useUsernames } from '../hooks/useUsernames';
 
@@ -9,6 +9,8 @@ const MediaPosts = ({ showNotification }) => {
   const [summaryStats, setSummaryStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [comments, setComments] = useState({});
+  const [loadingComments, setLoadingComments] = useState({});
   const [filters, setFilters] = useState({
     username: '',
     mediaType: '',
@@ -18,32 +20,7 @@ const MediaPosts = ({ showNotification }) => {
   
   const { usernames } = useUsernames();
 
-  useEffect(() => {
-    // Only fetch posts if we have a username filter
-    if (filters.username) {
-      fetchPosts();
-    } else {
-      setPosts([]);
-      setProfileInfo(null);
-      setSummaryStats(null);
-      setLoading(false);
-    }
-    
-    // Listen for global data fetch events
-    const handleDataFetched = () => {
-      if (filters.username) {
-        fetchPosts();
-      }
-    };
-    
-    window.addEventListener('dataFetched', handleDataFetched);
-    
-    return () => {
-      window.removeEventListener('dataFetched', handleDataFetched);
-    };
-  }, [filters]);
-
-  const fetchPosts = async () => {
+  const fetchPosts = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
@@ -63,7 +40,34 @@ const MediaPosts = ({ showNotification }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, showNotification]);
+
+  useEffect(() => {
+    // Only fetch posts if we have a username filter
+    if (filters.username) {
+      fetchPosts();
+    } else {
+      setPosts([]);
+      setProfileInfo(null);
+      setSummaryStats(null);
+      setLoading(false);
+    }
+  }, [filters, fetchPosts]);
+
+  // Separate useEffect for data fetch event listener
+  useEffect(() => {
+    const handleDataFetched = () => {
+      if (filters.username) {
+        fetchPosts();
+      }
+    };
+    
+    window.addEventListener('dataFetched', handleDataFetched);
+    
+    return () => {
+      window.removeEventListener('dataFetched', handleDataFetched);
+    };
+  }, [filters.username, fetchPosts]);
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -77,16 +81,16 @@ const MediaPosts = ({ showNotification }) => {
 
   const getMediaTypeIcon = (post) => {
     if (post.is_video) return '🎥';
-    if (post.media_type === 'reel') return '🎬';
-    if (post.is_carousel) return '🖼️';
+    if (post.media_type === 'video') return '🎥';
+    if (post.media_type === 'carousel_album') return '🖼️';
     return '📷';
   };
 
   const getMediaTypeColor = (type) => {
     switch (type) {
-      case 'reel': return 'bg-red-100 text-red-800';
-      case 'carousel': return 'bg-blue-100 text-blue-800';
-      case 'post': return 'bg-green-100 text-green-800';
+      case 'video': return 'bg-red-100 text-red-800';
+      case 'carousel_album': return 'bg-blue-100 text-blue-800';
+      case 'image': return 'bg-green-100 text-green-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -96,6 +100,39 @@ const MediaPosts = ({ showNotification }) => {
     if (score >= 100) return 'bg-yellow-100 text-yellow-800';
     return 'bg-red-100 text-red-800';
   };
+
+  const fetchComments = useCallback(async (postId, shortcode) => {
+    if (comments[postId]) return; // Already loaded
+    
+    setLoadingComments(prev => ({ ...prev, [postId]: true }));
+    try {
+      const response = await fetch(`http://localhost:5000/api/media/${shortcode}/comments`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setComments(prev => ({
+          ...prev,
+          [postId]: data.data || []
+        }));
+      } else {
+        showNotification('Error loading comments', 'error');
+      }
+    } catch (error) {
+      console.error('Error loading comments:', error);
+      showNotification('Error loading comments', 'error');
+    } finally {
+      setLoadingComments(prev => ({ ...prev, [postId]: false }));
+    }
+  }, [comments, showNotification]);
+
+  const toggleComments = useCallback((postId, shortcode) => {
+    if (selectedPost === postId) {
+      setSelectedPost(null);
+    } else {
+      setSelectedPost(postId);
+      fetchComments(postId, shortcode);
+    }
+  }, [selectedPost, fetchComments]);
 
   if (loading) {
     return (
@@ -214,9 +251,9 @@ const MediaPosts = ({ showNotification }) => {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-instagram-purple focus:ring-instagram-purple"
             >
               <option value="">All Types</option>
-              <option value="post">Post</option>
-              <option value="reel">Reel</option>
-              <option value="carousel">Carousel</option>
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+              <option value="carousel_album">Carousel</option>
             </select>
           </div>
 
@@ -281,6 +318,38 @@ const MediaPosts = ({ showNotification }) => {
 
             {/* Post Content */}
             <div className="p-4">
+              {/* Thumbnail/Media Preview */}
+              {post.display_url && (
+                <div className="mb-3 relative">
+                  <div className="w-full h-48 bg-gray-100 rounded-lg flex items-center justify-center">
+                    <img 
+                      src={post.display_url} 
+                      alt="Post thumbnail"
+                      className="w-full h-48 object-cover rounded-lg transition-opacity duration-300"
+                      onLoad={(e) => {
+                        e.target.style.opacity = '1';
+                      }}
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'flex';
+                      }}
+                      style={{ opacity: 0 }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg" style={{ display: 'none' }}>
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-instagram-purple mx-auto mb-2"></div>
+                        <p className="text-sm text-gray-500">Loading image...</p>
+                      </div>
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg" style={{ display: 'none' }}>
+                      <div className="text-center">
+                        <p className="text-sm text-gray-500">Image not available</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {post.caption && (
                 <p className="text-gray-900 mb-3 text-sm leading-relaxed">
                   {post.caption_preview || (post.caption.length > 100 
@@ -353,10 +422,10 @@ const MediaPosts = ({ showNotification }) => {
               {/* Post Info */}
               <div className="space-y-2 text-xs text-gray-500">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <Calendar className="w-3 h-3 mr-1" />
-                    {post.post_time_ago || formatDate(post.post_datetime_ist)}
-                  </div>
+                                     <div className="flex items-center">
+                     <Calendar className="w-3 h-3 mr-1" />
+                     {post.post_time_ago || formatDate(post.post_datetime_ist) || formatDate(post.post_date)}
+                   </div>
                   {post.instagram_url && (
                     <a
                       href={post.instagram_url}
@@ -406,6 +475,84 @@ const MediaPosts = ({ showNotification }) => {
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* Comments Section */}
+              <div className="border-t border-gray-200 pt-3">
+                <button
+                  onClick={() => toggleComments(post.id, post.shortcode)}
+                  className="flex items-center justify-between w-full text-left text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  <div className="flex items-center space-x-2">
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Comments</span>
+                    {post.comment_count > 0 && (
+                      <span className="text-xs bg-gray-100 px-2 py-1 rounded-full">
+                        {post.comment_count}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {selectedPost === post.id ? 'Hide' : 'Show'}
+                  </span>
+                </button>
+
+                {selectedPost === post.id && (
+                  <div className="mt-3 space-y-3">
+                    {loadingComments[post.id] ? (
+                      <div className="flex justify-center py-4">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-instagram-purple"></div>
+                      </div>
+                    ) : comments[post.id] && comments[post.id].length > 0 ? (
+                      <>
+                        <div className="text-xs text-gray-500 mb-2">
+                          Showing {comments[post.id].length} of {post.comment_count} comments
+                        </div>
+                        {comments[post.id].slice(0, 5).map((comment, index) => (
+                          <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                            <div className="flex items-start space-x-2">
+                              <div className="w-6 h-6 bg-gray-300 rounded-full flex-shrink-0"></div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center space-x-2 mb-1">
+                                  <span className="text-sm font-medium text-gray-900">
+                                    @{comment.owner_username}
+                                  </span>
+                                  {comment.owner_is_verified && (
+                                    <span className="text-blue-500 text-xs">✓</span>
+                                  )}
+                                  <span className="text-xs text-gray-500">
+                                    {comment.created_at_utc ? 
+                                      new Date(comment.created_at_utc).toLocaleDateString() : 
+                                      'Unknown date'
+                                    }
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-700">{comment.text}</p>
+                                {comment.like_count > 0 && (
+                                  <div className="flex items-center space-x-1 mt-1">
+                                    <Heart className="w-3 h-3 text-red-500" />
+                                    <span className="text-xs text-gray-500">{comment.like_count}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {comments[post.id].length > 5 && (
+                          <div className="text-center py-2">
+                            <span className="text-xs text-gray-500">
+                              +{comments[post.id].length - 5} more comments
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-center py-4 text-sm text-gray-500">
+                        No comments available
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

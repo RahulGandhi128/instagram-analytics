@@ -1,26 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Send, 
-  Image, 
-  Video, 
-  FileText, 
-  Palette,
-  Bot,
-  Download,
-  Copy,
-  RefreshCw,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  Users,
-  User,
-  Settings,
-  BarChart3,
-  Eye,
-  X,
-  Sparkles,
-  Edit
-} from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Send, Loader2, FileText, Download, User, Bot, AlertCircle, Video, Eye, RefreshCw, Edit, Copy, Palette, BarChart3, Settings, X, Sparkles, CheckCircle } from 'lucide-react';
 import { useUsernames } from '../hooks/useUsernames';
 import Brainstormer from './Brainstormer';
 
@@ -65,18 +44,12 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
   }, [messages]);
 
   useEffect(() => {
-    // Load conversation history when component mounts
     loadConversationHistory();
-  }, [sessionId]);
+  }, [loadConversationHistory]); // Add loadConversationHistory as dependency
 
   useEffect(() => {
-    // Load analytics data when username or time range changes
-    if (selectedUsername) {
-      loadAnalyticsData();
-    } else {
-      setAnalyticsData(null);
-    }
-  }, [selectedUsername, timeRange]);
+    loadAnalyticsData();
+  }, [loadAnalyticsData]); // Add loadAnalyticsData as dependency
 
   const loadAnalyticsData = async () => {
     if (!selectedUsername) return;
@@ -1053,7 +1026,7 @@ const ContentCreator = ({ analyticsContext, showNotification }) => {
             <div className="mt-2">
               <img 
                 src={editingImage} 
-                alt="Image being edited" 
+                alt="Being edited" 
                 className="w-16 h-16 rounded-lg border border-green-300 object-cover"
               />
             </div>

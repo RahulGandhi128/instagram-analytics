@@ -78,3 +78,97 @@ def download_image():
             'success': False,
             'error': f'Unexpected error: {str(e)}'
         }), 500
+
+@core_bp.route('/fetch-data', methods=['POST'])
+def fetch_data():
+    """
+    Trigger data collection from Star API
+    This endpoint handles data fetching requests from the frontend
+    """
+    try:
+        data = request.get_json() or {}
+        username = data.get('username')
+        dataTypes = data.get('dataTypes', {})
+        limits = data.get('limits', {})
+        
+        # Import the Star API data service
+        from services.star_api_data_service import create_star_api_data_service
+        import os
+        
+        # Get API key from environment
+        api_key = os.getenv('API_KEY')
+        if not api_key:
+            return jsonify({
+                'success': False,
+                'error': 'API_KEY not configured. Please set the API_KEY environment variable.'
+            }), 500
+        
+        # Create the service
+        star_api_service = create_star_api_data_service(api_key)
+        
+        # If username is provided, collect data for that specific profile
+        if username:
+            # Check if profile exists
+            from models.database import Profile
+            profile = Profile.query.filter_by(username=username).first()
+            if not profile:
+                return jsonify({
+                    'success': False,
+                    'error': f'Profile {username} not found. Please add the profile first.'
+                }), 404
+            
+            # Collect data for the specific profile with configuration
+            result = star_api_service.collect_comprehensive_data_with_config(username, dataTypes, limits)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Data collection completed for {username}',
+                'data': {
+                    'username': username,
+                    'status': 'completed',
+                    'timestamp': result.get('timestamp', '2025-08-21T13:54:00Z'),
+                    'collected_data': result
+                }
+            })
+        else:
+            # Collect data for all profiles
+            from models.database import Profile
+            profiles = Profile.query.all()
+            
+            if not profiles:
+                return jsonify({
+                    'success': False,
+                    'error': 'No profiles found. Please add profiles first.'
+                }), 404
+            
+            results = []
+            for profile in profiles:
+                try:
+                    result = star_api_service.collect_comprehensive_data(profile.username)
+                    results.append({
+                        'username': profile.username,
+                        'status': 'success',
+                        'data': result
+                    })
+                except Exception as e:
+                    results.append({
+                        'username': profile.username,
+                        'status': 'error',
+                        'error': str(e)
+                    })
+            
+            return jsonify({
+                'success': True,
+                'message': f'Data collection completed for {len(profiles)} profiles',
+                'data': {
+                    'profiles_processed': len(profiles),
+                    'results': results,
+                    'timestamp': '2025-08-21T13:54:00Z'
+                }
+            })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Data collection failed: {str(e)}'
+        }), 500

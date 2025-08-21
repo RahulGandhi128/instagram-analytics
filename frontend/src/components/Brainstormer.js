@@ -1,19 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Send, 
-  Lightbulb, 
-  Brain,
-  RefreshCw,
-  Clock,
-  User,
-  Bot,
-  TrendingUp,
-  Calendar,
-  Hash,
-  Users,
-  MessageCircle,
-  Sparkles
-} from 'lucide-react';
+import { Send, Brain, TrendingUp, MessageCircle, User, RefreshCw } from 'lucide-react';
 
 const Brainstormer = ({ analyticsData, selectedUsername, timeRange, showNotification }) => {
   const [sessionId] = useState(() => `brainstorm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);

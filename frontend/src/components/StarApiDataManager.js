@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Download, RefreshCw, Database, Zap } from 'lucide-react';
 import { starApiService } from '../services/starApiService';
 
@@ -7,13 +7,7 @@ const StarApiDataManager = ({ selectedUsername, onDataUpdated, showNotification 
   const [collecting, setCollecting] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (selectedUsername) {
-      fetchCollectionStatus();
-    }
-  }, [selectedUsername]);
-
-  const fetchCollectionStatus = async () => {
+  const fetchCollectionStatus = useCallback(async () => {
     if (!selectedUsername) return;
     
     setLoading(true);
@@ -26,7 +20,13 @@ const StarApiDataManager = ({ selectedUsername, onDataUpdated, showNotification 
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedUsername]);
+
+  useEffect(() => {
+    if (selectedUsername) {
+      fetchCollectionStatus();
+    }
+  }, [selectedUsername, fetchCollectionStatus]);
 
   const triggerDataCollection = async () => {
     if (!selectedUsername) {

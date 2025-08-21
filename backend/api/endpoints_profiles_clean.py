@@ -6,7 +6,9 @@ from sqlalchemy import desc, func
 from models.database import db, Profile, MediaPost
 from datetime import datetime
 import pytz
+from models.database import MediaComment
 
+# Define IST timezone
 IST = pytz.timezone('Asia/Kolkata')
 
 profiles_bp = Blueprint('profiles', __name__)
@@ -29,11 +31,11 @@ def get_profiles():
         
         for profile in profiles:
             # Get media count
-            media_count = MediaPost.query.filter_by(username=profile.username).count()
+            media_count = MediaPost.query.filter_by(profile_id=profile.id).count()
             
             # Get latest media for engagement rate calculation
-            latest_media = MediaPost.query.filter_by(username=profile.username)\
-                .order_by(desc(MediaPost.post_datetime_ist)).limit(10).all()
+            latest_media = MediaPost.query.filter_by(profile_id=profile.id)\
+                .order_by(desc(MediaPost.taken_at_timestamp)).limit(10).all()
             
             profile_data = profile.to_dict()
             profile_data.update({
@@ -81,7 +83,7 @@ def get_media():
             }), 404
         
         # Build query
-        query = MediaPost.query.filter_by(username=username)
+        query = MediaPost.query.filter_by(profile_id=profile.id)
         
         # Filter by media type
         if media_type:
@@ -91,15 +93,14 @@ def get_media():
         if sort_by == 'engagement':
             engagement_expr = (
                 func.coalesce(MediaPost.like_count, 0) +
-                func.coalesce(MediaPost.comment_count, 0) +
-                func.coalesce(MediaPost.save_count, 0) +
-                func.coalesce(MediaPost.share_count, 0)
+                func.coalesce(MediaPost.comment_count, 0)
+                # Note: save_count and share_count don't exist in current schema
             )
             query = query.order_by(desc(engagement_expr))
         elif sort_by == 'likes':
             query = query.order_by(desc(MediaPost.like_count))
         else:
-            query = query.order_by(desc(MediaPost.post_datetime_ist))
+            query = query.order_by(desc(MediaPost.taken_at_timestamp))
         
         # Get results
         media_posts = query.limit(limit).all()
@@ -110,27 +111,28 @@ def get_media():
             # Calculate metrics
             total_likes = post.like_count or 0
             total_comments = post.comment_count or 0
-            total_saves = post.save_count or 0
-            total_shares = post.share_count or 0
+            total_saves = getattr(post, 'save_count', 0) or 0  # This field might not exist
+            total_shares = getattr(post, 'share_count', 0) or 0  # This field might not exist
             total_engagement = total_likes + total_comments + total_saves + total_shares
             
             # Calculate engagement rate
             engagement_rate = 0
-            if profile.follower_count and profile.follower_count > 0:
-                engagement_rate = (total_engagement / profile.follower_count) * 100
+            if profile.followers_count and profile.followers_count > 0:
+                engagement_rate = (total_engagement / profile.followers_count) * 100
             
             # Format time
             post_time_ago = ""
-            if post.post_datetime_ist:
+            if post.taken_at_timestamp:
                 try:
-                    time_diff = datetime.now(IST) - post.post_datetime_ist
+                    # Use UTC for calculation since taken_at_timestamp is in UTC
+                    time_diff = datetime.utcnow() - post.taken_at_timestamp
                     if time_diff.days > 0:
                         post_time_ago = f"{time_diff.days}d ago"
                     elif time_diff.seconds > 3600:
                         post_time_ago = f"{time_diff.seconds // 3600}h ago"
                     else:
                         post_time_ago = f"{time_diff.seconds // 60}m ago"
-                except:
+                except Exception as e:
                     post_time_ago = "Unknown"
             
             # Media icon
@@ -139,34 +141,35 @@ def get_media():
                 media_icon = "🎥"
             elif post.media_type == 'reel':
                 media_icon = "🎬"
-            elif post.carousel_media_count and post.carousel_media_count > 1:
+            elif post.media_type == 'carousel':
                 media_icon = "🖼️"
             
             post_data = {
                 'id': post.id,
-                'username': post.username,
+                'username': profile.username,  # Get username from profile, not post
                 'shortcode': post.shortcode,
-                'instagram_url': f"https://instagram.com/p/{post.shortcode}/" if post.shortcode else post.link,
+                'instagram_url': f"https://instagram.com/p/{post.shortcode}/" if post.shortcode else getattr(post, 'link', ''),
                 'media_type': post.media_type or 'post',
                 'media_icon': media_icon,
                 'is_video': post.is_video or False,
-                'carousel_media_count': post.carousel_media_count or 1,
-                'is_carousel': (post.carousel_media_count or 1) > 1,
+                'carousel_media_count': 1 if post.media_type != 'carousel' else getattr(post, 'carousel_media_count', 1),
+                'is_carousel': post.media_type == 'carousel',
                 
                 # Content
                 'caption': post.caption,
                 'caption_preview': post.caption[:100] + "..." if post.caption and len(post.caption) > 100 else post.caption,
-                'hashtags': post.hashtags or [],
-                'hashtags_count': len(post.hashtags or []),
-                'mentions': post.mentions or [],
-                'mentions_count': len(post.mentions or []),
+                'display_url': post.display_url,
+                'hashtags': getattr(post, 'hashtags', []) or [],
+                'hashtags_count': len(getattr(post, 'hashtags', []) or []),
+                'mentions': getattr(post, 'mentions', []) or [],
+                'mentions_count': len(getattr(post, 'mentions', []) or []),
                 
                 # Timing
-                'post_datetime_ist': post.post_datetime_ist.isoformat() if post.post_datetime_ist else None,
-                'post_date': post.post_datetime_ist.strftime('%Y-%m-%d') if post.post_datetime_ist else None,
-                'post_time': post.post_datetime_ist.strftime('%H:%M') if post.post_datetime_ist else None,
+                'post_datetime_ist': post.taken_at_timestamp.isoformat() if post.taken_at_timestamp else None,
+                'post_date': post.taken_at_timestamp.strftime('%Y-%m-%d') if post.taken_at_timestamp else None,
+                'post_time': post.taken_at_timestamp.strftime('%H:%M') if post.taken_at_timestamp else None,
                 'post_time_ago': post_time_ago,
-                'post_day_of_week': post.post_datetime_ist.strftime('%A') if post.post_datetime_ist else None,
+                'post_day_of_week': post.taken_at_timestamp.strftime('%A') if post.taken_at_timestamp else None,
                 
                 # Engagement
                 'like_count': total_likes,
@@ -191,11 +194,11 @@ def get_media():
                 
                 # Flags
                 'is_ad': post.is_ad or False,
-                'is_sponsored': post.is_sponsored or False,
+                'is_sponsored': getattr(post, 'is_sponsored', False) or False,
                 
                 # Metadata
-                'first_fetched': post.first_fetched.isoformat() if post.first_fetched else None,
-                'last_updated': post.last_updated.isoformat() if post.last_updated else None
+                'first_fetched': getattr(post, 'first_fetched', None).isoformat() if getattr(post, 'first_fetched', None) else None,
+                'last_updated': post.updated_at.isoformat() if post.updated_at else None
             }
             posts_data.append(post_data)
         
@@ -213,13 +216,13 @@ def get_media():
                 'username': profile.username,
                 'full_name': profile.full_name,
                 'profile_pic_url': profile.profile_pic_url,
-                'follower_count': profile.follower_count,
+                'follower_count': profile.followers_count,
                 'following_count': profile.following_count,
                 'biography': profile.biography,
                 'is_verified': profile.is_verified,
                 'is_private': profile.is_private,
                 'is_business_account': profile.is_business_account,
-                'avg_engagement_rate': profile.avg_engagement_rate
+                'avg_engagement_rate': getattr(profile, 'avg_engagement_rate', 0) or 0
             },
             'summary_stats': {
                 'total_posts_returned': total_posts,
@@ -247,19 +250,70 @@ def get_media():
             'error': str(e)
         }), 500
 
-@profiles_bp.route('/comments/<media_id>', methods=['GET'])
-def get_media_comments(media_id):
-    """Get comments for a specific media post"""
+@profiles_bp.route('/profiles/<username>', methods=['DELETE'])
+def delete_profile(username):
+    """Delete a profile and all its associated data"""
     try:
-        # For now, return empty comments since we'll add this functionality later
+        # Find the profile
+        profile = Profile.query.filter_by(username=username).first()
+        if not profile:
+            return jsonify({
+                'success': False,
+                'error': 'Profile not found'
+            }), 404
+        
+        # Delete all associated data (cascade will handle this)
+        db.session.delete(profile)
+        db.session.commit()
+        
         return jsonify({
             'success': True,
-            'data': [],
-            'message': 'Comments functionality coming soon',
-            'media_id': media_id
+            'message': f'Profile {username} and all associated data deleted successfully'
         })
+        
     except Exception as e:
+        db.session.rollback()
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+@profiles_bp.route('/media/<shortcode>/comments', methods=['GET'])
+def get_media_comments(shortcode):
+    """Get comments for a specific media post"""
+    try:
+        # Find the media post by shortcode
+        media_post = MediaPost.query.filter_by(shortcode=shortcode).first()
+        if not media_post:
+            return jsonify({'success': False, 'error': 'Media post not found'}), 404
+        
+        # Get comments for this post
+        comments = MediaComment.query.filter_by(media_post_id=media_post.id).order_by(MediaComment.created_at.desc()).limit(25).all()
+        
+        comments_data = []
+        for comment in comments:
+            comment_data = {
+                'id': comment.id,
+                'instagram_id': comment.instagram_id,
+                'text': comment.text,
+                'created_at_utc': comment.created_at_utc.isoformat() if comment.created_at_utc else None,
+                'like_count': comment.like_count,
+                'owner_username': comment.owner_username,
+                'owner_id': comment.owner_id,
+                'owner_profile_pic_url': comment.owner_profile_pic_url,
+                'owner_is_verified': comment.owner_is_verified,
+                'parent_comment_id': comment.parent_comment_id,
+                'reply_count': comment.reply_count
+            }
+            comments_data.append(comment_data)
+        
+        return jsonify({
+            'success': True,
+            'data': comments_data,
+            'total_comments': len(comments_data),
+            'media_post_id': media_post.id,
+            'shortcode': shortcode
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

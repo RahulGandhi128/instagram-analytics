@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { BarChart3, Users, Bot, GitCompare, Info, Calendar as CalendarIcon, Palette } from 'lucide-react';
+import { BarChart3, Users, Bot } from 'lucide-react';
 
 // Components
 import Dashboard from './pages/Dashboard';
 import MediaPosts from './pages/MediaPosts';
 import Profiles from './pages/Profiles';
 import Chatbot from './pages/Chatbot';
-import Compare from './pages/Compare';
-import MoreInfo from './pages/MoreInfo';
-import Calendar from './pages/Calendar';
-import Creator from './pages/Creator';
+
 
 // Services
 // (No longer needed since fetch is centralized)
@@ -23,12 +20,8 @@ function App() {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  const navigation = [
+    const navigation = [
     { name: 'Dashboard', href: '/', icon: BarChart3 },
-    { name: 'Compare', href: '/compare', icon: GitCompare },
-    { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
-    { name: 'Creator', href: '/creator', icon: Palette },
-    { name: 'More Info', href: '/more-info', icon: Info },
     { name: 'Media Posts', href: '/media', icon: Users },
     { name: 'Profiles', href: '/profiles', icon: Users },
     { name: 'AI Assistant', href: '/chatbot', icon: Bot },
@@ -86,12 +79,8 @@ function App() {
 
         {/* Main Content */}
         <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-          <Routes>
+                    <Routes>
             <Route path="/" element={<Dashboard showNotification={showNotification} />} />
-            <Route path="/compare" element={<Compare showNotification={showNotification} />} />
-            <Route path="/calendar" element={<Calendar showNotification={showNotification} />} />
-            <Route path="/creator" element={<Creator showNotification={showNotification} />} />
-            <Route path="/more-info" element={<MoreInfo showNotification={showNotification} />} />
             <Route path="/media" element={<MediaPosts showNotification={showNotification} />} />
             <Route path="/profiles" element={<Profiles showNotification={showNotification} />} />
             <Route path="/chatbot" element={<Chatbot showNotification={showNotification} />} />

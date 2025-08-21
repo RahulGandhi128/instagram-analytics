@@ -5,10 +5,24 @@ class ProfileService {
   constructor() {
     this.profiles = [];
     this.listeners = new Set();
+    this.isLoading = false;
+    this.lastFetchTime = 0;
   }
 
   // Get all profiles
   async fetchProfiles() {
+    // Prevent excessive API calls and multiple simultaneous calls
+    const now = Date.now();
+    if (this.isLoading) {
+      return this.profiles;
+    }
+    if (this.lastFetchTime && now - this.lastFetchTime < 5000) {
+      return this.profiles;
+    }
+    
+    this.isLoading = true;
+    this.lastFetchTime = now;
+    
     try {
       const response = await analyticsAPI.getProfiles();
       this.profiles = response.data.data;
@@ -17,6 +31,8 @@ class ProfileService {
     } catch (error) {
       console.error('Error fetching profiles:', error);
       return [];
+    } finally {
+      this.isLoading = false;
     }
   }
 
@@ -52,9 +68,6 @@ class ProfileService {
 
 // Create singleton instance
 export const profileService = new ProfileService();
-
-// Initialize profiles on service creation
-profileService.fetchProfiles();
 
 // Listen for global profile updates
 window.addEventListener('profilesUpdated', () => {

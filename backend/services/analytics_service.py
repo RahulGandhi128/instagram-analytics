@@ -6,7 +6,7 @@ Eliminates redundancy across chatbot_service.py, instagram_service.py, and route
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy import func, desc
-from models.database import db, Profile, MediaPost, Story, DailyMetrics
+from models.database import db, Profile, MediaPost, Story
 from collections import defaultdict
 from config.analytics_config import ANALYTICS_SECTIONS, PERFORMANCE_THRESHOLDS, DATA_LIMITS
 import re
@@ -89,14 +89,14 @@ class AnalyticsService:
         
         # Base queries
         profiles_query = Profile.query
-        posts_query = MediaPost.query.filter(MediaPost.post_datetime_ist >= start_date)
-        stories_query = Story.query.filter(Story.expire_datetime_ist > datetime.now())
+        posts_query = MediaPost.query.filter(MediaPost.taken_at_timestamp >= start_date)
+        stories_query = Story.query.filter(Story.expiring_at_timestamp > datetime.now())
         
         # Apply username filter if specified
         if username:
             profiles_query = profiles_query.filter(Profile.username == username)
-            posts_query = posts_query.filter(MediaPost.og_username == username)
-            stories_query = stories_query.filter(Story.og_username == username)
+            posts_query = posts_query.join(Profile).filter(Profile.username == username)
+            stories_query = stories_query.join(Profile).filter(Profile.username == username)
         
         # Execute queries
         profiles = profiles_query.all()
@@ -128,7 +128,7 @@ class AnalyticsService:
             profile_data.append({
                 'username': profile.username,
                 'full_name': profile.full_name,
-                'followers': profile.follower_count,
+                'followers': profile.followers_count,
                 'following': profile.following_count,
                 'posts_count': profile.media_count,
                 'is_verified': profile.is_verified,
@@ -142,9 +142,9 @@ class AnalyticsService:
             'total_profiles': len(profiles),
             'verified_count': sum(1 for p in profiles if p.is_verified),
             'private_count': sum(1 for p in profiles if getattr(p, 'is_private', False)),
-            'total_followers': sum(p.follower_count or 0 for p in profiles),
+            'total_followers': sum(p.followers_count or 0 for p in profiles),
             'total_following': sum(p.following_count or 0 for p in profiles),
-            'avg_followers': (sum(p.follower_count or 0 for p in profiles) / len(profiles)) if profiles else 0,
+            'avg_followers': (sum(p.followers_count or 0 for p in profiles) / len(profiles)) if profiles else 0,
             'avg_following': (sum(p.following_count or 0 for p in profiles) / len(profiles)) if profiles else 0
         }
     
@@ -212,7 +212,7 @@ class AnalyticsService:
         for post in posts:
             post_engagement = (post.like_count or 0) + (post.comment_count or 0)
             posts_data.append({
-                'username': post.og_username,
+                'username': post.profile.username if post.profile else 'unknown',
                 'media_type': post.media_type,
                 'likes': post.like_count or 0,
                 'comments': post.comment_count or 0,
@@ -221,7 +221,7 @@ class AnalyticsService:
                 'is_collab': getattr(post, 'is_collab', False),
                 'engagement': post_engagement,
                 'extended_engagement': post_engagement + (getattr(post, 'reshare_count', 0)),
-                'posted_at': post.post_datetime_ist.isoformat() if post.post_datetime_ist else None,
+                'posted_at': post.taken_at_timestamp.isoformat() if post.taken_at_timestamp else None,
                 'caption': post.caption[:200] + '...' if post.caption and len(post.caption) > 200 else post.caption,
                 'link': getattr(post, 'link', ''),
                 'engagement_count': post_engagement  # For compatibility
@@ -398,16 +398,16 @@ class AnalyticsService:
         day_performance = defaultdict(lambda: {'count': 0, 'total_engagement': 0, 'avg_engagement': 0.0})
         
         for post in posts:
-            if post.post_datetime_ist:
+            if post.taken_at_timestamp:
                 post_engagement = (post.like_count or 0) + (post.comment_count or 0)
                 
                 # Hour analysis
-                hour = post.post_datetime_ist.hour
+                hour = post.taken_at_timestamp.hour
                 hour_performance[hour]['count'] += 1
                 hour_performance[hour]['total_engagement'] += post_engagement
                 
                 # Day analysis
-                day = post.post_datetime_ist.strftime('%A')
+                day = post.taken_at_timestamp.strftime('%A')
                 day_performance[day]['count'] += 1
                 day_performance[day]['total_engagement'] += post_engagement
         
@@ -488,8 +488,8 @@ class AnalyticsService:
         total_posts = len(posts)
         
         for post in posts:
-            if post.post_datetime_ist:
-                hour = post.post_datetime_ist.hour
+            if post.taken_at_timestamp:
+                hour = post.taken_at_timestamp.hour
                 engagement = (post.like_count or 0) + (post.comment_count or 0)
                 
                 if 6 <= hour < 12:  # Morning
@@ -558,8 +558,8 @@ class AnalyticsService:
         
         # Aggregate posts by date
         for post in posts:
-            if post.post_datetime_ist:
-                post_date = post.post_datetime_ist.date().isoformat()
+            if post.taken_at_timestamp:
+                post_date = post.taken_at_timestamp.date().isoformat()
                 if post_date in daily_data:
                     daily_data[post_date]['posts_count'] += 1
                     daily_data[post_date]['total_engagement'] += (post.like_count or 0) + (post.comment_count or 0)
@@ -586,7 +586,7 @@ class AnalyticsService:
         daily_metrics = []
         for i in range(days):
             day = start_date + timedelta(days=i)
-            day_posts = [p for p in posts if p.post_datetime_ist and p.post_datetime_ist.date() == day.date()]
+            day_posts = [p for p in posts if p.taken_at_timestamp and p.taken_at_timestamp.date() == day.date()]
             
             if day_posts:
                 day_engagement = sum((p.like_count or 0) + (p.comment_count or 0) for p in day_posts)
@@ -644,7 +644,7 @@ class AnalyticsService:
         avg_engagement = total_engagement / len(posts)
         
         # Get follower count for engagement rate calculation
-        total_followers = sum(p.follower_count or 0 for p in profiles) if profiles else 1
+        total_followers = sum(p.followers_count or 0 for p in profiles) if profiles else 1
         engagement_rate = round((avg_engagement / total_followers) * 100, 2) if total_followers > 0 else 0
         
         # Calculate content quality score (0-100 based on multiple factors)
@@ -746,10 +746,10 @@ class AnalyticsService:
             'stories_data': [
                 {
                     'story_id': story.story_id,
-                    'username': story.og_username,
+                    'username': story.profile.username if story.profile else 'unknown',
                     'media_type': story.media_type,
-                    'posted_at': story.post_datetime_ist.isoformat() if story.post_datetime_ist else None,
-                    'expires_at': story.expire_datetime_ist.isoformat() if story.expire_datetime_ist else None
+                    'posted_at': story.taken_at_timestamp.isoformat() if story.taken_at_timestamp else None,
+                    'expires_at': story.expiring_at_timestamp.isoformat() if story.expiring_at_timestamp else None
                 }
                 for story in stories
             ]
@@ -762,15 +762,15 @@ class AnalyticsService:
             # Get all posts for the username, ordered by date
             base_query = MediaPost.query
             if username:
-                base_query = base_query.filter(MediaPost.og_username == username)
+                base_query = base_query.join(Profile).filter(Profile.username == username)
             
-            all_posts = base_query.filter(MediaPost.post_datetime_ist.isnot(None)).order_by(MediaPost.post_datetime_ist.desc()).limit(200).all()
+            all_posts = base_query.filter(MediaPost.taken_at_timestamp.isnot(None)).order_by(MediaPost.taken_at_timestamp.desc()).limit(200).all()
             
             if not all_posts:
                 return {}
             
             # Get the most recent post date and calculate periods based on type
-            most_recent_date = all_posts[0].post_datetime_ist.date()
+            most_recent_date = all_posts[0].taken_at_timestamp.date()
             
             if period == 'week':
                 current_period_start = most_recent_date - timedelta(days=7)
@@ -803,20 +803,20 @@ class AnalyticsService:
             if username:
                 usernames = [username]
             else:
-                usernames = list(set([p.og_username for p in all_posts]))
+                usernames = list(set([p.profile.username for p in all_posts]))
             
             for uname in usernames:
-                user_posts = [p for p in all_posts if p.og_username == uname]
+                user_posts = [p for p in all_posts if p.profile.username == uname]
                 
                 # Split posts into two periods
                 if period == 'custom' and start_date and end_date:
                     # For custom dates, use exact date ranges
-                    current_period_posts = [p for p in user_posts if current_period_start <= p.post_datetime_ist.date() <= current_period_end]
-                    previous_period_posts = [p for p in user_posts if previous_period_start <= p.post_datetime_ist.date() < current_period_start]
+                    current_period_posts = [p for p in user_posts if current_period_start <= p.taken_at_timestamp.date() <= current_period_end]
+                    previous_period_posts = [p for p in user_posts if previous_period_start <= p.taken_at_timestamp.date() < current_period_start]
                 else:
                     # For week/month, use relative to most recent data
-                    current_period_posts = [p for p in user_posts if p.post_datetime_ist.date() > current_period_start]
-                    previous_period_posts = [p for p in user_posts if previous_period_start < p.post_datetime_ist.date() <= current_period_start]
+                    current_period_posts = [p for p in user_posts if p.taken_at_timestamp.date() > current_period_start]
+                    previous_period_posts = [p for p in user_posts if previous_period_start < p.taken_at_timestamp.date() <= current_period_start]
                 
                 # Calculate totals for current period
                 current_total_engagement = sum((p.like_count or 0) + (p.comment_count or 0) for p in current_period_posts)
@@ -941,3 +941,937 @@ class AnalyticsService:
         })
         
         return context
+
+    
+
+    def _calculate_time_period_breakdown(self, posts: List) -> Dict[str, Any]:
+
+        """Calculate morning/afternoon/evening posting breakdown"""
+
+        periods = {
+
+            'morning': {'count': 0, 'total_engagement': 0, 'percentage': 0.0, 'avg_engagement': 0.0},
+
+            'afternoon': {'count': 0, 'total_engagement': 0, 'percentage': 0.0, 'avg_engagement': 0.0},
+
+            'evening': {'count': 0, 'total_engagement': 0, 'percentage': 0.0, 'avg_engagement': 0.0},
+
+            'night': {'count': 0, 'total_engagement': 0, 'percentage': 0.0, 'avg_engagement': 0.0}
+
+        }
+
+        
+
+        total_posts = len(posts)
+
+        
+
+        for post in posts:
+
+            if post.taken_at_timestamp:
+
+                hour = post.taken_at_timestamp.hour
+
+                engagement = (post.like_count or 0) + (post.comment_count or 0)
+
+                
+
+                if 6 <= hour < 12:  # Morning
+
+                    periods['morning']['count'] += 1
+
+                    periods['morning']['total_engagement'] += engagement
+
+                elif 12 <= hour < 18:  # Afternoon
+
+                    periods['afternoon']['count'] += 1
+
+                    periods['afternoon']['total_engagement'] += engagement
+
+                elif 18 <= hour < 24:  # Evening
+
+                    periods['evening']['count'] += 1
+
+                    periods['evening']['total_engagement'] += engagement
+
+                else:  # Night (0-6 AM)
+
+                    periods['night']['count'] += 1
+
+                    periods['night']['total_engagement'] += engagement
+
+        
+
+        # Calculate percentages and averages
+
+        for period in periods:
+
+            if total_posts > 0:
+
+                periods[period]['percentage'] = round((periods[period]['count'] / total_posts) * 100, 1)
+
+            if periods[period]['count'] > 0:
+
+                periods[period]['avg_engagement'] = round(
+
+                    periods[period]['total_engagement'] / periods[period]['count'], 2
+
+                )
+
+        
+
+        return periods
+
+    
+
+    def _get_favoured_posting_time(self, hour_performance: Dict) -> str:
+
+        """Determine the favoured posting time based on engagement"""
+
+        if not hour_performance:
+
+            return "Morning (9:00 AM - 11:00 AM)"
+
+        
+
+        # Find the hour with highest average engagement
+
+        best_hour = max(hour_performance.items(), key=lambda x: x[1]['avg_engagement'])[0]
+
+        
+
+        if 6 <= best_hour < 12:
+
+            return f"Morning ({best_hour:02d}:00 - {(best_hour+2):02d}:00)"
+
+        elif 12 <= best_hour < 18:
+
+            return f"Afternoon ({best_hour:02d}:00 - {(best_hour+2):02d}:00)"
+
+        elif 18 <= best_hour < 24:
+
+            return f"Evening ({best_hour:02d}:00 - {(best_hour+2):02d}:00)"
+
+        else:
+
+            return f"Night ({best_hour:02d}:00 - {(best_hour+2):02d}:00)"
+
+    
+
+    def get_daily_chart_data(self, username: Optional[str] = None, days: int = 30) -> List[Dict[str, Any]]:
+
+        """Generate daily chart data for time series visualization"""
+
+        from datetime import date
+
+        
+
+        # Get base data
+
+        base_data = self._get_base_data(username, days)
+
+        posts = base_data['posts']
+
+        
+
+        # Create daily buckets
+
+        end_date = date.today()
+
+        daily_data = {}
+
+        
+
+        for i in range(days):
+
+            current_date = end_date - timedelta(days=i)
+
+            daily_data[current_date.isoformat()] = {
+
+                'date': current_date.isoformat(),
+
+                'posts_count': 0,
+
+                'total_engagement': 0,
+
+                'total_likes': 0,
+
+                'total_comments': 0,
+
+                'avg_engagement_per_post': 0
+
+            }
+
+        
+
+        # Aggregate posts by date
+
+        for post in posts:
+
+            if post.taken_at_timestamp:
+
+                post_date = post.taken_at_timestamp.date().isoformat()
+
+                if post_date in daily_data:
+
+                    daily_data[post_date]['posts_count'] += 1
+
+                    daily_data[post_date]['total_engagement'] += (post.like_count or 0) + (post.comment_count or 0)
+
+                    daily_data[post_date]['total_likes'] += (post.like_count or 0)
+
+                    daily_data[post_date]['total_comments'] += (post.comment_count or 0)
+
+        
+
+        # Calculate averages
+
+        for date_key in daily_data:
+
+            day_data = daily_data[date_key]
+
+            if day_data['posts_count'] > 0:
+
+                day_data['avg_engagement_per_post'] = round(
+
+                    day_data['total_engagement'] / day_data['posts_count']
+
+                )
+
+        
+
+        # Return sorted by date
+
+        return sorted(daily_data.values(), key=lambda x: x['date'])
+
+    
+
+    def _calculate_engagement_trends(self, base_data: Dict[str, Any], days: int) -> Dict[str, Any]:
+
+        """Calculate engagement trends over time"""
+
+        posts = base_data['posts']
+
+        start_date = base_data['start_date']
+
+        
+
+        # Daily metrics calculation
+
+        daily_metrics = []
+
+        for i in range(days):
+
+            day = start_date + timedelta(days=i)
+
+            day_posts = [p for p in posts if p.taken_at_timestamp and p.taken_at_timestamp.date() == day.date()]
+
+            
+
+            if day_posts:
+
+                day_engagement = sum((p.like_count or 0) + (p.comment_count or 0) for p in day_posts)
+
+                daily_metrics.append({
+
+                    'date': day.strftime('%Y-%m-%d'),
+
+                    'posts': len(day_posts),
+
+                    'engagement': day_engagement,
+
+                    'avg_engagement': day_engagement / len(day_posts)
+
+                })
+
+            else:
+
+                daily_metrics.append({
+
+                    'date': day.strftime('%Y-%m-%d'),
+
+                    'posts': 0,
+
+                    'engagement': 0,
+
+                    'avg_engagement': 0
+
+                })
+
+        
+
+        # Weekly trend calculation
+
+        recent_week = [m for m in daily_metrics if (datetime.now() - datetime.strptime(m['date'], '%Y-%m-%d')).days <= 7]
+
+        prev_week = [m for m in daily_metrics if 7 < (datetime.now() - datetime.strptime(m['date'], '%Y-%m-%d')).days <= 14]
+
+        
+
+        recent_avg = sum(m['engagement'] for m in recent_week) / len(recent_week) if recent_week else 0
+
+        prev_avg = sum(m['engagement'] for m in prev_week) / len(prev_week) if prev_week else 0
+
+        engagement_trend = ((recent_avg - prev_avg) / prev_avg * 100) if prev_avg > 0 else 0
+
+        
+
+        return {
+
+            'daily_metrics': daily_metrics,
+
+            'weekly_trend': {
+
+                'recent_week_avg': recent_avg,
+
+                'previous_week_avg': prev_avg,
+
+                'trend_percentage': engagement_trend
+
+            },
+
+            'engagement_trends': daily_metrics  # Legacy compatibility
+
+        }
+
+    
+
+    def _calculate_performance_insights(self, base_data: Dict[str, Any]) -> Dict[str, Any]:
+
+        """Calculate performance insights and recommendations"""
+
+        posts = base_data['posts']
+
+        profiles = base_data['profiles']
+
+        
+
+        if not posts:
+
+            return {
+
+                'insights': [],
+
+                'recommendations': [],
+
+                'performance_score': 0,
+
+                'engagement_rate': 0,
+
+                'content_quality': 0
+
+            }
+
+        
+
+        insights = []
+
+        recommendations = []
+
+        
+
+        # Calculate performance metrics
+
+        total_engagement = base_data['total_engagement']
+
+        avg_engagement = total_engagement / len(posts)
+
+        
+
+        # Get follower count for engagement rate calculation
+
+        total_followers = sum(p.followers_count or 0 for p in profiles) if profiles else 1
+
+        engagement_rate = round((avg_engagement / total_followers) * 100, 2) if total_followers > 0 else 0
+
+        
+
+        # Calculate content quality score (0-100 based on multiple factors)
+
+        quality_factors = []
+
+        
+
+        # Factor 1: Consistency (posting frequency)
+
+        posts_per_day = len(posts) / 30  # Assuming 30-day period
+
+        consistency_score = min(100, posts_per_day * 20)  # 5 posts/day = 100%
+
+        quality_factors.append(consistency_score)
+
+        
+
+        # Factor 2: Engagement consistency (variation in engagement)
+
+        engagements = [(p.like_count or 0) + (p.comment_count or 0) for p in posts]
+
+        if engagements and len(engagements) > 1:
+
+            engagement_variance = (max(engagements) - min(engagements)) / avg_engagement if avg_engagement > 0 else 0
+
+            consistency_eng_score = max(0, 100 - (engagement_variance * 20))
+
+            quality_factors.append(consistency_eng_score)
+
+        
+
+        # Factor 3: Content type diversity
+
+        media_types = set(p.media_type for p in posts if p.media_type)
+
+        diversity_score = min(100, len(media_types) * 33.33)  # 3 types = 100%
+
+        quality_factors.append(diversity_score)
+
+        
+
+        # Factor 4: Caption engagement (posts with captions)
+
+        captioned_posts = sum(1 for p in posts if p.caption and len(p.caption.strip()) > 0)
+
+        caption_score = (captioned_posts / len(posts)) * 100 if posts else 0
+
+        quality_factors.append(caption_score)
+
+        
+
+        # Average content quality score
+
+        content_quality = round(sum(quality_factors) / len(quality_factors) if quality_factors else 0)
+
+        
+
+        # Performance score based on engagement rate and content quality
+
+        if engagement_rate > 3:
+
+            performance_score = min(100, 80 + (engagement_rate * 2))
+
+        elif engagement_rate > 1:
+
+            performance_score = min(80, 50 + (engagement_rate * 15))
+
+        else:
+
+            performance_score = min(50, engagement_rate * 25)
+
+        
+
+        performance_score = round((performance_score + content_quality) / 2)
+
+        
+
+        # Generate insights based on data
+
+        if engagement_rate > 3:
+
+            insights.append("Excellent engagement rate - your audience is highly engaged!")
+
+        elif engagement_rate > 1:
+
+            insights.append("Good engagement rate - your content resonates well with your audience")
+
+        elif engagement_rate > 0.5:
+
+            insights.append("Average engagement rate - consider optimizing content strategy")
+
+        else:
+
+            insights.append("Low engagement rate - focus on audience targeting and content quality")
+
+        
+
+        if len(media_types) >= 3:
+
+            insights.append("Great content diversity with multiple media types")
+
+        elif len(media_types) == 2:
+
+            insights.append("Good content variety - consider adding more media types")
+
+        else:
+
+            insights.append("Limited content variety - try mixing different media types")
+
+        
+
+        # Generate recommendations
+
+        if len(posts) < 10:
+
+            recommendations.append("Increase posting frequency for better engagement and reach")
+
+        
+
+        if engagement_rate < 1:
+
+            recommendations.append("Focus on audience interaction and call-to-actions in captions")
+
+            recommendations.append("Use relevant hashtags to increase discoverability")
+
+        
+
+        if content_quality < 50:
+
+            recommendations.append("Improve content consistency and planning")
+
+            recommendations.append("Ensure all posts have meaningful captions")
+
+        
+
+        recommendations.append("Analyze top-performing posts to understand what works best")
+
+        recommendations.append("Monitor optimal posting times for your audience")
+
+        
+
+        return {
+
+            'insights': insights,
+
+            'recommendations': recommendations,
+
+            'performance_score': performance_score,
+
+            'engagement_rate': engagement_rate,
+
+            'content_quality': content_quality,
+
+            'avg_engagement': avg_engagement,
+
+            'engagement_category': (
+
+                'Excellent' if engagement_rate > 3 else 
+
+                'Good' if engagement_rate > 1 else 
+
+                'Average' if engagement_rate > 0.5 else 'Low'
+
+            ),
+
+            'quality_factors': {
+
+                'consistency': round(consistency_score),
+
+                'engagement_consistency': round(consistency_eng_score) if 'consistency_eng_score' in locals() else 0,
+
+                'diversity': round(diversity_score),
+
+                'caption_usage': round(caption_score)
+
+            }
+
+        }
+
+    
+
+    def _calculate_story_analytics(self, base_data: Dict[str, Any]) -> Dict[str, Any]:
+
+        """Calculate story-related analytics"""
+
+        stories = base_data['stories']
+
+        
+
+        return {
+
+            'total_active_stories': len(stories),
+
+            'stories_data': [
+
+                {
+
+                    'story_id': story.story_id,
+
+                    'username': story.og_username,
+
+                    'media_type': story.media_type,
+
+                    'posted_at': story.post_datetime_ist.isoformat() if story.post_datetime_ist else None,
+
+                    'expires_at': story.expire_datetime_ist.isoformat() if story.expire_datetime_ist else None
+
+                }
+
+                for story in stories
+
+            ]
+
+        }
+
+    
+
+    def get_weekly_comparison(self, username: Optional[str] = None, period: str = 'week', 
+
+                            start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+
+        """Get period-over-period comparison data based on most recent data."""
+
+        try:
+
+            # Get all posts for the username, ordered by date
+
+            base_query = MediaPost.query
+
+            if username:
+
+                base_query = base_query.filter(MediaPost.og_username == username)
+
+            
+
+            all_posts = base_query.filter(MediaPost.taken_at_timestamp.isnot(None)).order_by(MediaPost.taken_at_timestamp.desc()).limit(200).all()
+
+            
+
+            if not all_posts:
+
+                return {}
+
+            
+
+            # Get the most recent post date and calculate periods based on type
+
+            most_recent_date = all_posts[0].taken_at_timestamp.date()
+
+            
+
+            if period == 'week':
+
+                current_period_start = most_recent_date - timedelta(days=7)
+
+                previous_period_start = current_period_start - timedelta(days=7)
+
+                period_label = 'Week'
+
+            elif period == 'month':
+
+                current_period_start = most_recent_date - timedelta(days=30)
+
+                previous_period_start = current_period_start - timedelta(days=30)
+
+                period_label = 'Month'
+
+            elif period == 'custom' and start_date and end_date:
+
+                # Parse custom dates
+
+                from datetime import datetime as dt
+
+                current_period_end = dt.strptime(end_date, '%Y-%m-%d').date()
+
+                current_period_start = dt.strptime(start_date, '%Y-%m-%d').date()
+
+                
+
+                # Calculate period length and create previous period
+
+                period_length = (current_period_end - current_period_start).days
+
+                previous_period_end = current_period_start
+
+                previous_period_start = previous_period_end - timedelta(days=period_length)
+
+                
+
+                period_label = f'Custom ({start_date} to {end_date})'
+
+            else:  # fallback custom - 14 days each
+
+                current_period_start = most_recent_date - timedelta(days=14)
+
+                previous_period_start = current_period_start - timedelta(days=14)
+
+                period_label = 'Custom (14 days)'
+
+            
+
+            comparison = {}
+
+            
+
+            # Group by username
+
+            if username:
+
+                usernames = [username]
+
+            else:
+
+                usernames = list(set([p.og_username for p in all_posts]))
+
+            
+
+            for uname in usernames:
+
+                user_posts = [p for p in all_posts if p.og_username == uname]
+
+                
+
+                # Split posts into two periods
+
+                if period == 'custom' and start_date and end_date:
+
+                    # For custom dates, use exact date ranges
+
+                    current_period_posts = [p for p in user_posts if current_period_start <= p.taken_at_timestamp.date() <= current_period_end]
+
+                    previous_period_posts = [p for p in user_posts if previous_period_start <= p.taken_at_timestamp.date() < current_period_start]
+
+                else:
+
+                    # For week/month, use relative to most recent data
+
+                    current_period_posts = [p for p in user_posts if p.taken_at_timestamp.date() > current_period_start]
+
+                    previous_period_posts = [p for p in user_posts if previous_period_start < p.taken_at_timestamp.date() <= current_period_start]
+
+                
+
+                # Calculate totals for current period
+
+                current_total_engagement = sum((p.like_count or 0) + (p.comment_count or 0) for p in current_period_posts)
+
+                current_total_posts = len(current_period_posts)
+
+                current_avg_engagement = current_total_engagement / current_total_posts if current_total_posts > 0 else 0
+
+                
+
+                # Calculate totals for previous period
+
+                previous_total_engagement = sum((p.like_count or 0) + (p.comment_count or 0) for p in previous_period_posts)
+
+                previous_total_posts = len(previous_period_posts)
+
+                previous_avg_engagement = previous_total_engagement / previous_total_posts if previous_total_posts > 0 else 0
+
+                
+
+                # Calculate percentage changes
+
+                engagement_change = ((current_total_engagement - previous_total_engagement) / previous_total_engagement * 100) if previous_total_engagement > 0 else (100 if current_total_engagement > 0 else 0)
+
+                posts_change = ((current_total_posts - previous_total_posts) / previous_total_posts * 100) if previous_total_posts > 0 else (100 if current_total_posts > 0 else 0)
+
+                
+
+                comparison[uname] = {
+
+                    'current_week': {
+
+                        'total_engagement': current_total_engagement,
+
+                        'total_posts': current_total_posts,
+
+                        'avg_engagement_per_post': round(current_avg_engagement, 2)
+
+                    },
+
+                    'previous_week': {
+
+                        'total_engagement': previous_total_engagement,
+
+                        'total_posts': previous_total_posts,
+
+                        'avg_engagement_per_post': round(previous_avg_engagement, 2)
+
+                    },
+
+                    'changes': {
+
+                        'engagement_change_percent': round(engagement_change, 2),
+
+                        'posts_change_percent': round(posts_change, 2)
+
+                    },
+
+                    'date_range': {
+
+                        'current_period_start': current_period_start.isoformat(),
+
+                        'previous_period_start': previous_period_start.isoformat(),
+
+                        'most_recent_post': most_recent_date.isoformat(),
+
+                        'period_type': period_label
+
+                    }
+
+                }
+
+            
+
+            return comparison
+
+            
+
+        except Exception as e:
+
+            print(f"Error generating period comparison: {e}")
+
+            return {"error": str(e)}
+
+    
+
+    def get_performance_insights(self, username: Optional[str] = None, days: int = 30) -> Dict[str, Any]:
+
+        """Get performance insights - wrapper for backward compatibility"""
+
+        analytics = self.get_comprehensive_analytics(
+
+            username=username, 
+
+            days=days,
+
+            include_sections=['posts', 'media_types', 'posting_times', 'performance']
+
+        )
+
+        
+
+        # Transform to match original format
+
+        insights = {}
+
+        
+
+        if username:
+
+            insights[username] = {
+
+                'basic_stats': analytics['posts']['basic_stats'],
+
+                'top_posts': analytics['posts']['top_posts'],
+
+                'bottom_posts': analytics['posts']['bottom_posts'],
+
+                'media_type_analysis': analytics['media_types']['performance_by_type'],
+
+                'optimal_posting_times': analytics['posting_times']['optimal_posting_times'],
+
+                'performance_insights': analytics['performance']
+
+            }
+
+        else:
+
+            # Handle multiple users case
+
+            posts_data = analytics['posts']['posts_data']
+
+            usernames = list(set([p['username'] for p in posts_data]))
+
+            
+
+            for uname in usernames:
+
+                user_posts = [p for p in posts_data if p['username'] == uname]
+
+                user_analytics = self.get_comprehensive_analytics(
+
+                    username=uname, 
+
+                    days=days,
+
+                    include_sections=['posts', 'media_types', 'posting_times', 'performance']
+
+                )
+
+                
+
+                insights[uname] = {
+
+                    'basic_stats': user_analytics['posts']['basic_stats'],
+
+                    'top_posts': user_analytics['posts']['top_posts'],
+
+                    'bottom_posts': user_analytics['posts']['bottom_posts'],
+
+                    'media_type_analysis': user_analytics['media_types']['performance_by_type'],
+
+                    'optimal_posting_times': user_analytics['posting_times']['optimal_posting_times'],
+
+                    'performance_insights': user_analytics['performance']
+
+                }
+
+        
+
+        return insights
+
+    
+
+    def get_analytics_context_for_chatbot(self, username: Optional[str] = None, days: int = 30) -> Dict[str, Any]:
+
+        """Get analytics context formatted for chatbot - eliminates chatbot_service redundancy"""
+
+        analytics = self.get_comprehensive_analytics(username=username, days=days)
+
+        
+
+        # Transform to match chatbot expected format
+
+        context = {
+
+            'period_days': days,
+
+            'username_filter': username,
+
+            'total_profiles': analytics['metadata']['total_profiles'],
+
+            'total_posts': analytics['metadata']['total_posts'],
+
+            'total_engagement': analytics['metadata']['total_engagement'],
+
+            'user_profiles': analytics['profiles']['profiles_data'],
+
+            'recent_posts': analytics['posts']['posts_data'],
+
+            'hashtag_analysis': analytics['hashtags'],
+
+            'media_type_analysis': analytics['media_types'],
+
+            'optimal_posting_analysis': analytics['posting_times']['optimal_posting_analysis'],
+
+            'engagement_trends': analytics['engagement_trends']['daily_metrics'],
+
+            'performance_insights': {
+
+                'best_performing_posts': analytics['posts']['best_performing_posts'],
+
+                'worst_performing_posts': analytics['posts']['worst_performing_posts'],
+
+                'engagement_trend_percentage': analytics['engagement_trends']['weekly_trend']['trend_percentage'],
+
+                'recommendations': analytics['performance']['recommendations'],
+
+                'performance_score': analytics['performance']['performance_score']
+
+            }
+
+        }
+
+        
+
+        # Add legacy fields for compatibility
+
+        context.update({
+
+            'total_stories': analytics['stories']['total_active_stories'],
+
+            'avg_likes': analytics['posts']['basic_stats']['avg_likes'],
+
+            'avg_comments': analytics['posts']['basic_stats']['avg_comments'],
+
+            'avg_engagement_per_post': analytics['posts']['basic_stats']['avg_engagement_per_post'],
+
+            'top_post_likes': analytics['posts']['top_post_engagement']
+
+        })
+
+        
+
+        return context
+
+

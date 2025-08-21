@@ -28,6 +28,7 @@ export const analyticsAPI = {
   // Profiles
   getProfiles: () => api.get('/profiles'),
   getProfile: (username) => api.get(`/profiles/${username}`),
+  deleteProfile: (username) => api.delete(`/profiles/${username}`),
 
   // Media
   getMedia: (params = {}) => api.get('/media', { params }),

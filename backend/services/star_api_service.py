@@ -1,16 +1,14 @@
 """
-Enhanced Star API Service for Instagram Analytics
-Supports comprehensive data collection from Star API endpoints
+Star API Service - Handles all Star API interactions
 """
 import requests
 import json
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union
-import pytz
-from models.database import db, Profile, MediaPost, Story, DailyMetrics
-from sqlalchemy import func, desc, and_
+from datetime import datetime
+from typing import Dict, Any, Optional, List, Union
+from models.database import db, Profile, MediaPost, Story
 import logging
+import pytz
 
 # Timezone setup
 IST = pytz.timezone("Asia/Kolkata")
@@ -85,7 +83,7 @@ class StarAPIService:
                     return data
                 else:
                     logger.warning(f"API returned status: {data.get('status')} for endpoint: {endpoint}")
-                    return None
+                    return data  # Return the data even if status is not "done"
                     
             except requests.exceptions.RequestException as e:
                 logger.error(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}")
@@ -460,6 +458,11 @@ class StarAPIService:
         """Get replies to a comment"""
         payload = {"id": comment_id, "media_id": media_id}
         return self._make_request("https://starapi1.p.rapidapi.com/instagram/comment/get_replies", payload)
+    
+    def get_media_comments(self, shortcode: str) -> Optional[Dict]:
+        """Get comments for a media post by shortcode"""
+        payload = {"shortcode": shortcode}
+        return self._make_request(self.endpoints['media_comments'], payload)
     
     def get_audio_media(self, audio_id: str) -> Optional[Dict]:
         """Get media using a specific audio by audio ID"""

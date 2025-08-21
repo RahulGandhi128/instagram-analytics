@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users } from 'lucide-react';
-import { getProxiedImageUrl } from '../utils/imageProxy';
+import imageProxy from '../utils/imageProxy';
 
 const ProfilePicture = ({ profile, size = 'medium', className = '' }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -85,7 +85,7 @@ const ProfilePicture = ({ profile, size = 'medium', className = '' }) => {
     );
   }
 
-  const proxiedUrl = getProxiedImageUrl(profile.profile_pic_url);
+  const proxiedUrl = imageProxy(profile.profile_pic_url, 150, 150);
 
   return (
     <div className="relative">

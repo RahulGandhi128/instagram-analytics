@@ -1,10 +1,10 @@
 """
-Star API Endpoints - Instagram data collection using Star API
+Star API Endpoints - Data collection and management
 """
 from flask import Blueprint, request, jsonify
 from services.star_api_service import create_star_api_service
 from services.star_api_data_service import create_star_api_data_service
-from models.database import db, Profile, MediaPost, Story, Highlight, FollowerData, MediaComment, HashtagData
+from models.database import db, Profile, MediaPost, Story, FollowerData, MediaComment, HashtagData
 import os
 
 star_api_bp = Blueprint('star_api', __name__)

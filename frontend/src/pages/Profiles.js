@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, Lock, ExternalLink, Verified, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Users, CheckCircle, Lock, ExternalLink, Verified, Plus, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
 import { analyticsAPI } from '../services/api';
 import ProfilePicture from '../components/ProfilePicture';
+import DataCollectionDialog from '../components/DataCollectionDialog';
 
 const Profiles = ({ showNotification }) => {
   const [profiles, setProfiles] = useState([]);
@@ -10,29 +11,49 @@ const Profiles = ({ showNotification }) => {
   const [newUsername, setNewUsername] = useState('');
   const [addingProfile, setAddingProfile] = useState(false);
   const [deletingProfile, setDeletingProfile] = useState(null);
+  const [fetchingData, setFetchingData] = useState(false);
+  const [lastFetchTime, setLastFetchTime] = useState(0);
+  const [showDataDialog, setShowDataDialog] = useState(false);
+  const [selectedUsernameForCollection, setSelectedUsernameForCollection] = useState('');
 
   const fetchProfiles = useCallback(async () => {
+    // Prevent excessive API calls - only fetch if more than 2 seconds have passed
+    const now = Date.now();
+    if (now - lastFetchTime < 2000) {
+      return;
+    }
+    setLastFetchTime(now);
+    
     setLoading(true);
     try {
       const response = await analyticsAPI.getProfiles();
       const profileData = response.data.data;
       
-      // Debug profile picture URLs
-      console.log('Profile data received:', profileData.map(profile => ({
-        username: profile.username,
-        profile_pic_url: profile.profile_pic_url,
-        profile_pic_exists: !!profile.profile_pic_url,
-        profile_pic_length: profile.profile_pic_url ? profile.profile_pic_url.length : 0
-      })));
-      
       setProfiles(profileData);
+      
+      // Check if we have real data or just sample data (only show once)
+      const hasRealData = profileData.some(profile => 
+        profile.total_media_posts > 1 || profile.media_count > 1
+      );
+      
+      if (!hasRealData && profileData.length > 0) {
+        // Only show notification once per session
+        const hasShownWarning = sessionStorage.getItem('sampleDataWarningShown');
+        if (!hasShownWarning) {
+          showNotification(
+            '⚠️ Sample data detected. Click "Fetch Real Data" to get live Instagram data.',
+            'warning'
+          );
+          sessionStorage.setItem('sampleDataWarningShown', 'true');
+        }
+      }
     } catch (error) {
       console.error('Error fetching profiles:', error);
       showNotification('Error loading profiles', 'error');
     } finally {
       setLoading(false);
     }
-  }, [showNotification]);
+  }, [lastFetchTime, showNotification]);
 
   useEffect(() => {
     fetchProfiles();
@@ -47,7 +68,7 @@ const Profiles = ({ showNotification }) => {
     return () => {
       window.removeEventListener('dataFetched', handleDataFetched);
     };
-  }, [fetchProfiles]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addProfile = async () => {
     if (!newUsername.trim()) {
@@ -114,7 +135,80 @@ const Profiles = ({ showNotification }) => {
     }
   };
 
+  const fetchRealData = async () => {
+    // Show dialog to select username and configure data collection
+    setSelectedUsernameForCollection('');
+    setShowDataDialog(true);
+  };
+
+  const handleStartDataCollection = async (collectionConfig) => {
+    setFetchingData(true);
+    try {
+      showNotification(`Fetching data for @${collectionConfig.username}... This may take a few minutes`, 'info');
+      
+      const response = await fetch('http://localhost:5000/api/fetch-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: collectionConfig.username,
+          dataTypes: collectionConfig.dataTypes,
+          limits: collectionConfig.limits
+        }),
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        // Check if data collection was successful
+        const results = data.data?.results || [];
+        const successfulCollections = results.filter(r => r.status === 'success' && r.data?.status === 'success');
+        const failedCollections = results.filter(r => r.status === 'error' || r.data?.status === 'error');
+        
+        if (failedCollections.length > 0 && successfulCollections.length === 0) {
+          showNotification(
+            '❌ Data collection failed. Please check if the Star API key is configured correctly.',
+            'error'
+          );
+        } else if (failedCollections.length > 0) {
+          showNotification(
+            `⚠️ Data collection partially completed. ${successfulCollections.length} successful, ${failedCollections.length} failed.`,
+            'warning'
+          );
+        } else {
+          showNotification(`✅ Data collected successfully for @${collectionConfig.username}!`, 'success');
+          // Clear the sample data warning since we now have real data
+          sessionStorage.removeItem('sampleDataWarningShown');
+        }
+        
+        // Refresh profiles to show updated data
+        await fetchProfiles();
+        
+        // Trigger global update for other pages
+        window.dispatchEvent(new CustomEvent('dataFetched'));
+      } else {
+        if (data.error && data.error.includes('API_KEY')) {
+          showNotification(
+            '❌ Star API key not configured. Please set up the API key in the backend.',
+            'error'
+          );
+        } else {
+          showNotification(`Error: ${data.error}`, 'error');
+        }
+      }
+    } catch (error) {
+      showNotification('Error fetching Instagram data', 'error');
+    } finally {
+      setFetchingData(false);
+    }
+  };
+
   const formatNumber = (num) => {
+    // Handle null, undefined, or non-numeric values
+    if (num === null || num === undefined || isNaN(num)) {
+      return '0';
+    }
+    
     if (num >= 1000000) {
       return `${(num / 1000000).toFixed(1)}M`;
     }
@@ -144,7 +238,24 @@ const Profiles = ({ showNotification }) => {
             Overview of all tracked Instagram accounts
           </p>
         </div>
-        <div className="mt-4 flex md:mt-0 md:ml-4">
+        <div className="mt-4 flex md:mt-0 md:ml-4 space-x-3">
+          <button
+            onClick={fetchRealData}
+            disabled={fetchingData}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+          >
+            {fetchingData ? (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                Fetching...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Fetch Real Data
+              </>
+            )}
+          </button>
           <button
             onClick={() => setShowAddModal(true)}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
@@ -190,7 +301,7 @@ const Profiles = ({ showNotification }) => {
               <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
                 <div className="text-center">
                   <div className="text-sm sm:text-lg font-semibold text-gray-900">
-                    {formatNumber(profile.follower_count)}
+                    {formatNumber(profile.followers_count)}
                   </div>
                   <div className="text-xs text-gray-500">Followers</div>
                 </div>
@@ -202,7 +313,7 @@ const Profiles = ({ showNotification }) => {
                 </div>
                 <div className="text-center">
                   <div className="text-sm sm:text-lg font-semibold text-gray-900">
-                    {formatNumber(profile.media_count)}
+                    {formatNumber(profile.total_media_posts || profile.media_count)}
                   </div>
                   <div className="text-xs text-gray-500">Posts</div>
                 </div>
@@ -239,7 +350,7 @@ const Profiles = ({ showNotification }) => {
               </div>
 
               {/* Engagement Rate */}
-              {profile.follower_count > 0 && (
+              {profile.followers_count > 0 && (
                 <div className="bg-gray-50 rounded-lg p-3 mb-4">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Engagement Rate</span>
@@ -400,6 +511,14 @@ const Profiles = ({ showNotification }) => {
           </div>
         </div>
       )}
+
+      {/* Data Collection Dialog */}
+      <DataCollectionDialog
+        isOpen={showDataDialog}
+        onClose={() => setShowDataDialog(false)}
+        onStartCollection={handleStartDataCollection}
+        username={selectedUsernameForCollection}
+      />
     </div>
   );
 };
